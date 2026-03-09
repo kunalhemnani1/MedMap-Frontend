@@ -12,14 +12,42 @@ import SkeletonCard from "@/components/shared/SkeletonCard";
 import EmptyState from "@/components/shared/EmptyState";
 
 interface Hospital {
-  Sr_No: number;
-  Hospital_Name: string;
-  Address_Original_First_Line: string;
-  District: string;
-  State: string;
-  Pincode: number;
-  Telephone: number;
-  Mobile_Number: number;
+  id: string;
+  name: string;
+  type: string;
+  address: string;
+  city: string;
+  district: string;
+  state: string;
+  pincode: number;
+  latitude: number;
+  longitude: number;
+  telephone: string;
+  mobile: string;
+  emergency: string;
+  email: string;
+  website: string;
+  specialties: string[];
+  beds: number;
+  rating: number;
+  review_count: number;
+  accreditations: string[];
+  established_year: number;
+  has_emergency: boolean;
+  has_ambulance: boolean;
+  has_pharmacy: boolean;
+  has_blood_bank: boolean;
+  has_icu: boolean;
+  accepts_insurance: boolean;
+  consultation_fee_range: number[];
+  avg_wait_time_days: number;
+  image_url: string;
+  _score?: number;
+}
+
+interface FacetItem {
+  value: string;
+  count: number;
 }
 
 interface SearchResponse {
@@ -28,6 +56,11 @@ interface SearchResponse {
   total: number;
   totalPages: number;
   results: Hospital[];
+  facets?: {
+    states: FacetItem[];
+    districts: FacetItem[];
+    pincodes: FacetItem[];
+  };
 }
 
 const CATEGORY_POOL = ["Diagnostic", "Surgical", "Dental", "Maternity", "Emergency", "Wellness"] as const;
@@ -64,6 +97,7 @@ function SearchPageContent() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [facets, setFacets] = useState<SearchResponse["facets"]>(undefined);
 
   const fetchResults = useCallback(async () => {
     setIsLoading(true);
@@ -83,6 +117,19 @@ function SearchPageContent() {
       if (district) params.append("district", district);
       if (pincode) params.append("pincode", pincode);
 
+      // Pass sort
+      if (sort !== "relevance") params.append("sort", sort);
+
+      // Pass filters
+      if (filters.distance !== "any") params.append("distance", filters.distance);
+      if (filters.priceMin > 0) params.append("priceMin", String(filters.priceMin));
+      if (filters.priceMax < PRICE_CEIL_DEFAULT) params.append("priceMax", String(filters.priceMax));
+      if (filters.categories.length > 0) params.append("categories", filters.categories.join(","));
+      if (filters.rating > 0) params.append("rating", String(filters.rating));
+      if (filters.insurance) params.append("insurance", "true");
+      if (filters.availability) params.append("availability", "true");
+      if (filters.accreditation.length > 0) params.append("accreditation", filters.accreditation.join(","));
+
       const res = await fetch(`/api/search?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch");
 
@@ -91,13 +138,14 @@ function SearchPageContent() {
       setPage(data.page);
       setTotalPages(data.totalPages || 1);
       setTotal(data.total);
+      if (data.facets) setFacets(data.facets);
     } catch (err) {
       console.error(err);
       setError("Could not load results. Please try again.");
     } finally {
       setIsLoading(false);
     }
-  }, [searchParams]);
+  }, [searchParams, sort, filters]);
 
   // Main fetch effect for Search Results + AI Insight
   useEffect(() => {
@@ -168,30 +216,24 @@ function SearchPageContent() {
   };
 
   const deriveMeta = (hospital: Hospital) => {
-    const seed = hospital.Sr_No || hospital.Pincode || hospital.Telephone;
+    const priceFrom = hospital.consultation_fee_range?.[0] ?? 500;
+    const seed = hospital.pincode || 0;
     const rand = (s: number) => {
       const x = Math.sin(s) * 10000;
       return x - Math.floor(x);
     };
-
-    const rating = 3.4 + rand(seed) * 1.6;
-    const reviewCount = 50 + Math.floor(rand(seed + 1) * 300);
-    const priceFrom = 2000 + Math.floor(rand(seed + 2) * 5000);
     const distance = 1 + rand(seed + 3) * 10;
-    const hasInsurance = rand(seed + 4) > 0.35;
-    const isOpenNow = rand(seed + 5) > 0.5;
     const categories = CATEGORY_POOL.filter((_, idx) => rand(seed + idx + 6) > 0.6);
-    const accreditation = rand(seed + 20) > 0.5 ? ["NABH"] : [];
 
     return {
-      rating: Number(rating.toFixed(1)),
-      reviewCount,
+      rating: hospital.rating ?? 4.0,
+      reviewCount: hospital.review_count ?? 0,
       priceFrom,
       distance: Number(distance.toFixed(1)),
-      hasInsurance,
-      isOpenNow,
+      hasInsurance: hospital.accepts_insurance ?? false,
+      isOpenNow: hospital.has_emergency ?? false,
       categories: categories.length ? categories : [CATEGORY_POOL[seed % CATEGORY_POOL.length]],
-      accreditation,
+      accreditation: hospital.accreditations ?? [],
     };
   };
 
@@ -372,18 +414,20 @@ function SearchPageContent() {
                 >
                   {processedResults.map(({ hospital, meta }) => (
                     <HospitalCard
-                      key={hospital.Sr_No}
-                      id={String(hospital.Sr_No)}
-                      name={hospital.Hospital_Name}
-                      address={hospital.Address_Original_First_Line}
-                      district={hospital.District}
-                      state={hospital.State}
-                      pincode={hospital.Pincode}
+                      key={hospital.id}
+                      id={hospital.id}
+                      name={hospital.name}
+                      address={hospital.address}
+                      district={hospital.district}
+                      state={hospital.state}
+                      pincode={hospital.pincode}
                       rating={meta.rating}
                       reviewCount={meta.reviewCount}
                       priceFrom={meta.priceFrom}
                       distance={meta.distance}
                       accreditation={meta.accreditation}
+                      imageUrl={hospital.image_url}
+                      isOpen={meta.isOpenNow}
                     />
                   ))}
                 </div>

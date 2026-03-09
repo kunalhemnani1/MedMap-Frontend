@@ -1,19 +1,25 @@
-import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
-import { searchHospitals } from "@/lib/searchHospitals";
 
+export async function POST(_req: Request) {
+    return NextResponse.json({
+        text: "The AI assistant is temporarily unavailable. Please use the search and filters above to find hospitals.",
+    });
+}
+
+/* ── AI chatbot (temporarily disabled) ────────────────────────────────────────
+import { GoogleGenAI } from "@google/genai";
+import { searchHospitals } from "@/lib/searchHospitals";
 
 export async function POST(req: Request) {
     try {
         const { message, searchParams } = await req.json();
 
-        // Perform search based on parameters
-        const searchResults = searchHospitals({
+        const searchResults = await searchHospitals({
             query: searchParams.query,
             state: searchParams.state,
             district: searchParams.district,
             pincode: searchParams.pincode,
-            limit: 5 // Limit context to top 5 results to avoid token limits and keep relevance
+            limit: 5,
         });
 
         const context = JSON.stringify(searchResults.results);
@@ -35,24 +41,18 @@ export async function POST(req: Request) {
         6. Do not mention "JSON" or "database" in your response; speak naturally.
         `;
         const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-            throw new Error("Chatbot api key not configured");
-        }
-        const ai = new GoogleGenAI({ apiKey })
+        if (!apiKey) throw new Error("Chatbot api key not configured");
+        const ai = new GoogleGenAI({ apiKey });
 
         const resp = await ai.models.generateContent({
             model: "gemini-2.5-flash-lite",
-            contents: prompt
+            contents: prompt,
         });
 
-        const text = resp.text;
-        return NextResponse.json({ text });
-
+        return NextResponse.json({ text: resp.text });
     } catch (error) {
         console.error("Error calling Gemini API:", error);
-        return NextResponse.json(
-            { error: "Failed to generate response" },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: "Failed to generate response" }, { status: 500 });
     }
 }
+── end disabled block ──────────────────────────────────────────────────────── */
