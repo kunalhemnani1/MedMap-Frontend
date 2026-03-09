@@ -8,6 +8,8 @@ import {
     Compass,
     GitCompare,
     HelpCircle,
+    LogIn,
+    LogOut,
     Menu,
     Moon,
     Search,
@@ -15,11 +17,13 @@ import {
     Sun,
     TrendingUp,
     User,
+    UserPlus,
     X,
     Building2,
 } from "lucide-react";
 
 import { useTheme } from "@/components/providers/ThemeProvider";
+import { useSession, signOut } from "@/lib/auth-client";
 
 export default function Navbar() {
     const { theme, toggleTheme } = useTheme();
@@ -27,6 +31,7 @@ export default function Navbar() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [productsOpen, setProductsOpen] = useState(false);
     const [resourcesOpen, setResourcesOpen] = useState(false);
+    const { data: session } = useSession();
 
     // Delayed hide timers to avoid flicker on hover dropdowns
     const productsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -170,12 +175,30 @@ export default function Navbar() {
                         {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                     </button>
 
-                    <Link href="/user/dashboard" className="btn btn-ghost btn-circle">
-                        <User className="w-5 h-5" />
-                    </Link>
-                    <Link href="/search" className="btn btn-primary btn-sm hidden md:flex">
-                        Get Started
-                    </Link>
+                    {session?.user ? (
+                        <>
+                            <Link href="/user/dashboard" className="btn btn-ghost btn-circle">
+                                <User className="w-5 h-5" />
+                            </Link>
+                            <button
+                                onClick={() => signOut().then(() => window.location.href = "/")}
+                                className="btn btn-ghost btn-sm hidden md:flex gap-1"
+                            >
+                                <LogOut className="w-4 h-4" />
+                                Sign Out
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <Link href="/auth/login" className="btn btn-ghost btn-sm hidden md:flex gap-1">
+                                <LogIn className="w-4 h-4" />
+                                Sign In
+                            </Link>
+                            <Link href="/auth/register" className="btn btn-primary btn-sm hidden md:flex">
+                                Get Started
+                            </Link>
+                        </>
+                    )}
                 </div>
             </nav>
 
@@ -237,14 +260,44 @@ export default function Navbar() {
                         </ul>
 
                         <div className="px-4 pb-6 flex flex-col gap-2">
-                            <Link
-                                href="/user/dashboard"
-                                onClick={() => setMobileMenuOpen(false)}
-                                className="btn btn-ghost justify-start"
-                            >
-                                <User className="w-4 h-4" />
-                                Dashboard
-                            </Link>
+                            {session?.user ? (
+                                <>
+                                    <Link
+                                        href="/user/dashboard"
+                                        onClick={() => setMobileMenuOpen(false)}
+                                        className="btn btn-ghost justify-start"
+                                    >
+                                        <User className="w-4 h-4" />
+                                        {session.user.name || "Dashboard"}
+                                    </Link>
+                                    <button
+                                        onClick={() => { setMobileMenuOpen(false); signOut().then(() => window.location.href = "/"); }}
+                                        className="btn btn-outline justify-start text-error"
+                                    >
+                                        <LogOut className="w-4 h-4" />
+                                        Sign Out
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <Link
+                                        href="/auth/login"
+                                        onClick={() => setMobileMenuOpen(false)}
+                                        className="btn btn-ghost justify-start"
+                                    >
+                                        <LogIn className="w-4 h-4" />
+                                        Sign In
+                                    </Link>
+                                    <Link
+                                        href="/auth/register"
+                                        onClick={() => setMobileMenuOpen(false)}
+                                        className="btn btn-primary justify-start"
+                                    >
+                                        <UserPlus className="w-4 h-4" />
+                                        Create Account
+                                    </Link>
+                                </>
+                            )}
                             <Link
                                 href="/providers/register"
                                 onClick={() => setMobileMenuOpen(false)}
@@ -252,14 +305,6 @@ export default function Navbar() {
                             >
                                 <Building2 className="w-4 h-4" />
                                 For Providers
-                            </Link>
-                            <Link
-                                href="/search"
-                                onClick={() => setMobileMenuOpen(false)}
-                                className="btn btn-primary justify-start"
-                            >
-                                <Search className="w-4 h-4" />
-                                Start Searching
                             </Link>
                         </div>
                     </aside>

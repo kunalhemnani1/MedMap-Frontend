@@ -1,7 +1,7 @@
 "use client";
-import { useState, useEffect, Suspense, useMemo, useCallback } from "react";
+import { useState, useEffect, Suspense, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Search, SlidersHorizontal, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { Search, SlidersHorizontal, ChevronLeft, ChevronRight, Sparkles, GitCompare, X, MapIcon, LocateFixed } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 import FilterSidebar from "@/components/search/FilterSidebar";
 import SortDropdown, { SortOption } from "@/components/search/SortDropdown";
@@ -10,6 +10,10 @@ import ReactMarkdown from "react-markdown";
 import HospitalCard from "@/components/cards/HospitalCard";
 import SkeletonCard from "@/components/shared/SkeletonCard";
 import EmptyState from "@/components/shared/EmptyState";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+
+const MapView = dynamic(() => import("@/components/search/MapView"), { ssr: false });
 
 interface Hospital {
   id: string;
@@ -43,6 +47,7 @@ interface Hospital {
   avg_wait_time_days: number;
   image_url: string;
   _score?: number;
+  _distance_km?: number;
 }
 
 interface FacetItem {
@@ -99,6 +104,61 @@ function SearchPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [facets, setFacets] = useState<SearchResponse["facets"]>(undefined);
 
+  // Compare state
+  const [compareIds, setCompareIds] = useState<Set<string | number>>(new Set());
+  const toggleCompare = (id: string | number) => {
+    setCompareIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 5) next.add(id);
+      return next;
+    });
+  };
+
+  // Bookmark state
+  const [savedIds, setSavedIds] = useState<Set<string | number>>(new Set());
+  const toggleSave = (id: string | number) => {
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Geolocation state
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [showMap, setShowMap] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => setGeoError("Location access denied. Distance features need your location."),
+        { enableHighAccuracy: false, timeout: 10000 }
+      );
+    }
+  }, []);
+
+  // Throttle ref for price filter
+  const priceThrottleRef = useRef<NodeJS.Timeout | null>(null);
+  const [pendingFilters, setPendingFilters] = useState(defaultFilters);
+
+  const handleFilterChange = (next: typeof defaultFilters) => {
+    const priceChanged = next.priceMin !== filters.priceMin || next.priceMax !== filters.priceMax;
+    if (priceChanged) {
+      setPendingFilters(next);
+      if (priceThrottleRef.current) clearTimeout(priceThrottleRef.current);
+      priceThrottleRef.current = setTimeout(() => {
+        setFilters({ ...next, priceMax: Math.min(next.priceMax, priceCeil) });
+      }, 400);
+    } else {
+      setFilters({ ...next, priceMax: Math.min(next.priceMax, priceCeil) });
+      setPendingFilters(next);
+    }
+  };
+
   const fetchResults = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -119,6 +179,12 @@ function SearchPageContent() {
 
       // Pass sort
       if (sort !== "relevance") params.append("sort", sort);
+
+      // Pass user location for distance calculations
+      if (userLocation) {
+        params.append("lat", String(userLocation.lat));
+        params.append("lon", String(userLocation.lng));
+      }
 
       // Pass filters
       if (filters.distance !== "any") params.append("distance", filters.distance);
@@ -145,7 +211,7 @@ function SearchPageContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [searchParams, sort, filters]);
+  }, [searchParams, sort, filters, userLocation]);
 
   // Main fetch effect for Search Results + AI Insight
   useEffect(() => {
@@ -222,14 +288,25 @@ function SearchPageContent() {
       const x = Math.sin(s) * 10000;
       return x - Math.floor(x);
     };
-    const distance = 1 + rand(seed + 3) * 10;
     const categories = CATEGORY_POOL.filter((_, idx) => rand(seed + idx + 6) > 0.6);
+
+    // Use real distance from ES if available, otherwise estimate with Haversine
+    let distance: number | null = null;
+    if (hospital._distance_km != null) {
+      distance = hospital._distance_km;
+    } else if (userLocation && hospital.latitude && hospital.longitude) {
+      const R = 6371;
+      const dLat = ((hospital.latitude - userLocation.lat) * Math.PI) / 180;
+      const dLon = ((hospital.longitude - userLocation.lng) * Math.PI) / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos((userLocation.lat * Math.PI) / 180) * Math.cos((hospital.latitude * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+      distance = Number((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1));
+    }
 
     return {
       rating: hospital.rating ?? 4.0,
       reviewCount: hospital.review_count ?? 0,
       priceFrom,
-      distance: Number(distance.toFixed(1)),
+      distance,
       hasInsurance: hospital.accepts_insurance ?? false,
       isOpenNow: hospital.has_emergency ?? false,
       categories: categories.length ? categories : [CATEGORY_POOL[seed % CATEGORY_POOL.length]],
@@ -253,7 +330,7 @@ function SearchPageContent() {
       if (meta.priceFrom < (filters.priceMin || 0)) return false;
       if (meta.priceFrom > (filters.priceMax || PRICE_CEIL_DEFAULT)) return false;
       if (filters.rating && meta.rating < filters.rating) return false;
-      if (filters.distance !== "any" && meta.distance > Number(filters.distance)) return false;
+      if (filters.distance !== "any" && (meta.distance == null || meta.distance > Number(filters.distance))) return false;
       if (filters.insurance && !meta.hasInsurance) return false;
       if (filters.availability && !meta.isOpenNow) return false;
       if (filters.categories.length && !filters.categories.some((c) => meta.categories.includes(c as any))) return false;
@@ -267,7 +344,7 @@ function SearchPageContent() {
       case "price-desc":
         return filtered.sort((a, b) => b.meta.priceFrom - a.meta.priceFrom);
       case "distance":
-        return filtered.sort((a, b) => a.meta.distance - b.meta.distance);
+        return filtered.sort((a, b) => (a.meta.distance ?? 99999) - (b.meta.distance ?? 99999));
       case "rating":
         return filtered.sort((a, b) => b.meta.rating - a.meta.rating);
       case "reviews":
@@ -307,9 +384,9 @@ function SearchPageContent() {
         <div className="flex gap-6">
           {/* Desktop Filters */}
           <FilterSidebar
-            filters={filters}
-            onFilterChange={(next) => setFilters({ ...next, priceMax: Math.min(next.priceMax, priceCeil) })}
-            onClear={() => setFilters({ ...defaultFilters, priceMax: priceCeil })}
+            filters={pendingFilters}
+            onFilterChange={handleFilterChange}
+            onClear={() => { setFilters({ ...defaultFilters, priceMax: priceCeil }); setPendingFilters({ ...defaultFilters, priceMax: priceCeil }); }}
             priceCeil={priceCeil}
           />
 
@@ -367,15 +444,55 @@ function SearchPageContent() {
 
                 <SortDropdown value={sort} onChange={setSort} />
                 <ViewToggle value={view} onChange={setView} />
+                <button
+                  className={`btn btn-sm ${showMap ? "btn-primary" : "btn-outline"}`}
+                  onClick={() => setShowMap(!showMap)}
+                  title="Toggle Map"
+                >
+                  <MapIcon className="w-4 h-4" />
+                </button>
               </div>
             </div>
+
+            {/* Location banner */}
+            {geoError && (
+              <div className="alert alert-warning mb-4 text-sm">
+                <LocateFixed className="w-4 h-4" />
+                <span>{geoError}</span>
+                <button className="btn btn-ghost btn-xs" onClick={() => {
+                  setGeoError(null);
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                    () => setGeoError("Location access denied.")
+                  );
+                }}>Retry</button>
+              </div>
+            )}
+
+            {/* Map View */}
+            {showMap && (
+              <div className="mb-6">
+                <MapView
+                  hospitals={processedResults.map(({ hospital }) => ({
+                    id: hospital.id,
+                    name: hospital.name,
+                    latitude: hospital.latitude,
+                    longitude: hospital.longitude,
+                    district: hospital.district,
+                    state: hospital.state,
+                    rating: hospital.rating,
+                  }))}
+                  userLocation={userLocation}
+                />
+              </div>
+            )}
 
             {/* Mobile Filters */}
             {showMobileFilters && (
               <FilterSidebar
-                filters={filters}
-                onFilterChange={(next) => setFilters({ ...next, priceMax: Math.min(next.priceMax, priceCeil) })}
-                onClear={() => setFilters({ ...defaultFilters, priceMax: priceCeil })}
+                filters={pendingFilters}
+                onFilterChange={handleFilterChange}
+                onClear={() => { setFilters({ ...defaultFilters, priceMax: priceCeil }); setPendingFilters({ ...defaultFilters, priceMax: priceCeil }); }}
                 priceCeil={priceCeil}
                 isMobile
                 onClose={() => setShowMobileFilters(false)}
@@ -428,6 +545,9 @@ function SearchPageContent() {
                       accreditation={meta.accreditation}
                       imageUrl={hospital.image_url}
                       isOpen={meta.isOpenNow}
+                      onCompare={() => toggleCompare(hospital.id)}
+                      onSave={() => toggleSave(hospital.id)}
+                      isSaved={savedIds.has(hospital.id)}
                     />
                   ))}
                 </div>
@@ -485,6 +605,27 @@ function SearchPageContent() {
           </main>
         </div>
       </div>
+
+      {/* Floating Compare Bar */}
+      {compareIds.size > 0 && (
+        <div className="fixed bottom-0 inset-x-0 z-50 bg-base-100 border-t border-base-200 shadow-2xl">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <GitCompare className="w-5 h-5 text-primary" />
+              <span className="font-medium">{compareIds.size} hospital{compareIds.size > 1 ? "s" : ""} selected</span>
+              <button className="btn btn-ghost btn-xs" onClick={() => setCompareIds(new Set())}>
+                <X className="w-3 h-3" /> Clear
+              </button>
+            </div>
+            <Link
+              href={`/compare?ids=${Array.from(compareIds).join(",")}`}
+              className={`btn btn-primary btn-sm ${compareIds.size < 2 ? "btn-disabled" : ""}`}
+            >
+              Compare Now
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

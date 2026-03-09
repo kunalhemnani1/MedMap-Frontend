@@ -42,17 +42,9 @@ export default function HospitalCard({
         <div className="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/30 transition-all duration-300 group">
             {/* Image */}
             <figure className="relative h-40 bg-base-200 overflow-hidden">
-                {imageUrl ? (
-                    <img
-                        src={imageUrl}
-                        alt={name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                        <Building2 className="w-16 h-16 text-base-content/20" />
-                    </div>
-                )}
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/5 to-secondary/5">
+                    <Building2 className="w-16 h-16 text-base-content/20" />
+                </div>
                 {/* Save button */}
                 <button
                     onClick={onSave}
