@@ -1,5 +1,5 @@
 "use client";
-import { useState, use } from "react";
+import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import {
   Star,
@@ -12,6 +12,7 @@ import {
   Navigation,
   Building2,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
@@ -21,64 +22,103 @@ interface HospitalPageProps {
 
 const TABS = ["Overview", "Procedures", "Reviews", "Location", "Contact"];
 
-// Mock data for demo
-const mockHospital = {
-  name: "Apollo Hospital",
-  address: "21 Greams Lane, Off Greams Road, Thousand Lights West",
-  district: "Mumbai",
-  state: "Maharashtra",
-  pincode: 400001,
-  phone: "+91 98765 43210",
-  rating: 4.5,
-  reviewCount: 328,
-  isOpen: true,
-  accreditation: ["NABH", "JCI"],
-  about:
-    "Apollo Hospitals is a premier healthcare provider in India, known for cutting-edge technology and world-class medical expertise. With over 40 years of excellence, we offer comprehensive healthcare services across multiple specialties.",
-  specialties: [
-    "Cardiology",
-    "Orthopedics",
-    "Neurology",
-    "Oncology",
-    "Gastroenterology",
-  ],
-  facilities: ["24x7 Emergency", "ICU", "Pharmacy", "Diagnostic Lab", "Parking"],
-  procedures: [
-    { name: "MRI Scan - Brain", price: 4500 },
-    { name: "CT Scan - Chest", price: 3200 },
-    { name: "X-Ray", price: 500 },
-    { name: "Blood Test Panel", price: 1200 },
-    { name: "Echocardiogram", price: 2500 },
-  ],
-  reviews: [
-    {
-      author: "Rahul M.",
-      rating: 5,
-      date: "2 weeks ago",
-      text: "Excellent service and very professional staff. The doctors explained everything clearly.",
-    },
-    {
-      author: "Priya S.",
-      rating: 4,
-      date: "1 month ago",
-      text: "Good hospital with modern facilities. Wait times could be better.",
-    },
-  ],
-};
+interface HospitalData {
+  Sr_No: number;
+  Hospital_Name: string;
+  Address_Original_First_Line: string;
+  State: string;
+  District: string;
+  Pincode: number;
+  Telephone: string;
+  Mobile_Number: number | string;
+  Emergency_Num: number | string;
+  Location: string;
+  Location_Coordinates: string;
+  doctors: {
+    name: string;
+    specialty: string;
+    qualification: string;
+    experience: number;
+    fee: number;
+    rating: number;
+  }[];
+  review_summary: {
+    average_rating: number;
+    total_reviews: number;
+  };
+  procedures: {
+    Procedure_Name: string;
+    Price_INR: number;
+    Procedure_Category: string;
+  }[];
+  [key: string]: unknown;
+}
 
 export default function HospitalDetailPage({ params }: HospitalPageProps) {
   const { slug } = use(params);
   const [activeTab, setActiveTab] = useState("Overview");
   const [isSaved, setIsSaved] = useState(false);
+  const [data, setData] = useState<HospitalData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reviews, setReviews] = useState<
+    { User_Name: string; Rating: number; Review_Date: string; Review_Comment: string; Review_Title: string }[]
+  >([]);
 
-  const hospital = mockHospital; // In real app, fetch by slug
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch(`/api/hospitals/${slug}`);
+        if (!res.ok) throw new Error("Not found");
+        const json = await res.json();
+        setData(json);
+
+        // Fetch reviews for this hospital
+        const rRes = await fetch(`/api/reviews?hospital_id=${slug}`);
+        if (rRes.ok) {
+          const rJson = await rRes.json();
+          setReviews(rJson.reviews || []);
+        }
+      } catch {
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [slug]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!data?.Hospital_Name) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4">
+        <Building2 className="w-16 h-16 text-base-content/20" />
+        <h2 className="text-xl font-semibold">Hospital Not Found</h2>
+        <Link href="/search" className="btn btn-primary">Back to Search</Link>
+      </div>
+    );
+  }
+
+  const hospital = data;
+  const doctors = data.doctors || [];
+  const pricing = data.procedures || [];
+  const reviewStats = data.review_summary || { average_rating: 0, total_reviews: 0 };
+
+  const specialties = [...new Set(doctors.map((d) => d.specialty))];
+  const phone = hospital.Telephone || (hospital.Mobile_Number ? String(hospital.Mobile_Number) : "");
 
   return (
     <div className="min-h-screen bg-base-100">
       <Breadcrumb
         items={[
           { label: "Search", href: "/search" },
-          { label: hospital.name, href: `/hospital/${slug}` },
+          { label: hospital.Hospital_Name, href: `/hospital/${slug}` },
         ]}
       />
 
@@ -98,36 +138,33 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
           {/* Info Card */}
           <div className="card bg-base-100 border border-base-200 shadow-lg">
             <div className="card-body">
-              <h1 className="card-title text-2xl">{hospital.name}</h1>
+              <h1 className="card-title text-2xl">{hospital.Hospital_Name}</h1>
 
               <div className="flex items-center gap-2 text-sm">
                 <Star className="w-4 h-4 text-warning fill-warning" />
-                <span className="font-medium">{hospital.rating}</span>
+                <span className="font-medium">{reviewStats.average_rating.toFixed(1)}</span>
                 <span className="text-base-content/50">
-                  ({hospital.reviewCount} reviews)
+                  ({reviewStats.total_reviews} reviews)
                 </span>
               </div>
 
               <p className="text-sm text-base-content/70 flex items-start gap-2 mt-2">
                 <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
-                {hospital.address}, {hospital.district}, {hospital.state} -{" "}
-                {hospital.pincode}
+                {hospital.Address_Original_First_Line}, {hospital.District}, {hospital.State} -{" "}
+                {hospital.Pincode}
               </p>
 
               <div className="flex flex-wrap gap-2 mt-4">
-                {hospital.accreditation.map((acc) => (
-                  <span
-                    key={acc}
-                    className="badge badge-primary badge-outline gap-1"
-                  >
+                {specialties.length > 0 && (
+                  <span className="badge badge-primary badge-outline gap-1">
                     <BadgeCheck className="w-3 h-3" />
-                    {acc}
+                    {specialties.length} Specialties
                   </span>
-                ))}
-                {hospital.isOpen && (
+                )}
+                {hospital.Emergency_Num && Number(hospital.Emergency_Num) !== 0 && (
                   <span className="badge badge-success gap-1">
                     <Clock className="w-3 h-3" />
-                    Open Now
+                    Emergency
                   </span>
                 )}
               </div>
@@ -156,7 +193,7 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
               </div>
 
               <a
-                href={`tel:${hospital.phone}`}
+                href={`tel:${phone}`}
                 className="btn btn-primary btn-block mt-4"
               >
                 <Phone className="w-4 h-4" />
@@ -186,43 +223,63 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
               <div>
                 <h2 className="text-xl font-semibold mb-4">About</h2>
                 <p className="text-base-content/70 leading-relaxed mb-6">
-                  {hospital.about}
+                  {hospital.Hospital_Name} is located in {hospital.District}, {hospital.State}.
+                  {hospital.Location ? ` Address: ${hospital.Location}.` : ""}
                 </p>
 
-                <h3 className="font-semibold mb-3">Specialties</h3>
-                <div className="flex flex-wrap gap-2 mb-6">
-                  {hospital.specialties.map((s) => (
-                    <span key={s} className="badge badge-lg badge-ghost">
-                      {s}
-                    </span>
-                  ))}
-                </div>
+                {specialties.length > 0 && (
+                  <>
+                    <h3 className="font-semibold mb-3">Specialties ({specialties.length})</h3>
+                    <div className="flex flex-wrap gap-2 mb-6">
+                      {specialties.map((s) => (
+                        <span key={s} className="badge badge-lg badge-ghost">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
 
-                <h3 className="font-semibold mb-3">Facilities</h3>
-                <div className="flex flex-wrap gap-2">
-                  {hospital.facilities.map((f) => (
-                    <span key={f} className="badge badge-lg badge-outline">
-                      {f}
-                    </span>
-                  ))}
-                </div>
+                {doctors.length > 0 && (
+                  <>
+                    <h3 className="font-semibold mb-3">Doctors ({doctors.length})</h3>
+                    <div className="space-y-2 mb-6">
+                      {doctors.slice(0, 5).map((d, i) => (
+                        <div key={i} className="flex items-center justify-between bg-base-200 rounded-lg p-3">
+                          <div>
+                            <div className="font-medium">{d.name}</div>
+                            <div className="text-sm text-base-content/60">{d.specialty} &middot; {d.experience}y exp</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-semibold text-primary">₹{d.fee}</div>
+                            <div className="text-xs text-base-content/60">★ {d.rating}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
               </div>
 
               <div className="card bg-base-200 border border-base-300">
                 <div className="card-body">
                   <h2 className="card-title">Quick Price Check</h2>
                   <div className="divide-y divide-base-300">
-                    {hospital.procedures.slice(0, 5).map((proc) => (
+                    {pricing.slice(0, 5).map((proc, i) => (
                       <div
-                        key={proc.name}
+                        key={i}
                         className="flex items-center justify-between py-3"
                       >
-                        <span className="text-sm">{proc.name}</span>
+                        <span className="text-sm">{proc.Procedure_Name}</span>
                         <span className="font-semibold text-primary">
-                          ₹{proc.price.toLocaleString("en-IN")}
+                          ₹{proc.Price_INR.toLocaleString("en-IN")}
                         </span>
                       </div>
                     ))}
+                    {pricing.length === 0 && (
+                      <p className="py-3 text-base-content/60 text-sm">No pricing data available</p>
+                    )}
                   </div>
                   <Link
                     href={`/hospital/${slug}/procedures`}
@@ -256,11 +313,11 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {hospital.procedures.map((proc, i) => (
+                    {pricing.map((proc, i) => (
                       <tr key={i} className="hover">
-                        <td className="font-medium">{proc.name}</td>
+                        <td className="font-medium">{proc.Procedure_Name}</td>
                         <td className="text-primary font-semibold">
-                          ₹{proc.price.toLocaleString("en-IN")}
+                          ₹{proc.Price_INR.toLocaleString("en-IN")}
                         </td>
                         <td>
                           <button className="btn btn-primary btn-sm">
@@ -279,45 +336,44 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
             <div>
               <div className="flex items-center gap-4 mb-6">
                 <div className="text-center">
-                  <div className="text-4xl font-bold">{hospital.rating}</div>
+                  <div className="text-4xl font-bold">{reviewStats.average_rating.toFixed(1)}</div>
                   <div className="flex text-warning">
                     {Array(5)
                       .fill(0)
                       .map((_, i) => (
                         <Star
                           key={i}
-                          className={`w-5 h-5 ${i < Math.floor(hospital.rating) ? "fill-current" : ""
+                          className={`w-5 h-5 ${i < Math.floor(reviewStats.average_rating) ? "fill-current" : ""
                             }`}
                         />
                       ))}
                   </div>
                   <div className="text-sm text-base-content/50">
-                    {hospital.reviewCount} reviews
+                    {reviewStats.total_reviews} reviews
                   </div>
                 </div>
-                <button className="btn btn-primary ml-auto">Write Review</button>
               </div>
 
               <div className="space-y-4">
-                {hospital.reviews.map((review, i) => (
+                {reviews.map((review, i) => (
                   <div key={i} className="card bg-base-200 border border-base-300">
                     <div className="card-body">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="avatar placeholder">
                             <div className="bg-primary text-primary-content rounded-full w-10">
-                              <span>{review.author[0]}</span>
+                              <span>{review.User_Name?.[0] || "?"}</span>
                             </div>
                           </div>
                           <div>
-                            <div className="font-medium">{review.author}</div>
+                            <div className="font-medium">{review.User_Name}</div>
                             <div className="text-xs text-base-content/50">
-                              {review.date}
+                              {review.Review_Date}
                             </div>
                           </div>
                         </div>
                         <div className="flex text-warning">
-                          {Array(review.rating)
+                          {Array(review.Rating)
                             .fill(0)
                             .map((_, i) => (
                               <Star
@@ -327,8 +383,9 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
                             ))}
                         </div>
                       </div>
-                      <p className="text-sm text-base-content/70 mt-2">
-                        {review.text}
+                      <p className="text-sm font-medium mt-2">{review.Review_Title}</p>
+                      <p className="text-sm text-base-content/70">
+                        {review.Review_Comment}
                       </p>
                     </div>
                   </div>
@@ -351,12 +408,12 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
                 <div className="card-body">
                   <h3 className="font-semibold">Address</h3>
                   <p className="text-base-content/70">
-                    {hospital.address}, {hospital.district}, {hospital.state} -{" "}
-                    {hospital.pincode}
+                    {hospital.Address_Original_First_Line}, {hospital.District}, {hospital.State} -{" "}
+                    {hospital.Pincode}
                   </p>
                   <a
                     href={`https://maps.google.com/?q=${encodeURIComponent(
-                      hospital.address
+                      `${hospital.Hospital_Name} ${hospital.District} ${hospital.State}`
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -377,15 +434,15 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
                   <h3 className="font-semibold mb-4">Contact Information</h3>
                   <div className="space-y-3">
                     <a
-                      href={`tel:${hospital.phone}`}
+                      href={`tel:${phone}`}
                       className="flex items-center gap-3 hover:text-primary"
                     >
                       <Phone className="w-5 h-5" />
-                      {hospital.phone}
+                      {phone || "N/A"}
                     </a>
                     <div className="flex items-center gap-3">
                       <MapPin className="w-5 h-5" />
-                      {hospital.address}
+                      {hospital.Address_Original_First_Line}
                     </div>
                   </div>
                 </div>
