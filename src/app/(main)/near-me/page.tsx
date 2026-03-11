@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import {
     MapPin,
     Navigation,
@@ -8,7 +9,7 @@ import {
     AlertCircle,
     Phone,
     Clock,
-    Star,
+    RefreshCw,
     ArrowRight,
     Filter,
     List,
@@ -21,100 +22,118 @@ import {
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
+const NearMeMap = dynamic(() => import("./NearMeMap"), { ssr: false });
+
 interface NearbyHospital {
     id: string;
     name: string;
     address: string;
     distance: number;
-    rating: number;
-    reviewCount: number;
     type: "hospital" | "clinic" | "pharmacy" | "lab" | "emergency";
-    isOpen: boolean;
-    openUntil: string;
+    openingHours: string;
     phone: string;
-    specialties: string[];
+    lat: number;
+    lon: number;
 }
 
-const mockHospitals: NearbyHospital[] = [
-    {
-        id: "1",
-        name: "Apollo Hospital",
-        address: "Scheme No. 54, Vijay Nagar, Indore",
-        distance: 1.2,
-        rating: 4.8,
-        reviewCount: 2340,
-        type: "hospital",
-        isOpen: true,
-        openUntil: "24 hours",
-        phone: "+91 731 2555555",
-        specialties: ["Cardiology", "Orthopedics", "Neurology"],
-    },
-    {
-        id: "2",
-        name: "Medanta Hospital",
-        address: "AB Road, Near Bombay Hospital, Indore",
-        distance: 2.5,
-        rating: 4.6,
-        reviewCount: 1890,
-        type: "hospital",
-        isOpen: true,
-        openUntil: "24 hours",
-        phone: "+91 731 2666666",
-        specialties: ["Oncology", "Cardiac Surgery", "Nephrology"],
-    },
-    {
-        id: "3",
-        name: "City Care Clinic",
-        address: "MG Road, Opposite City Center Mall, Indore",
-        distance: 0.8,
-        rating: 4.3,
-        reviewCount: 456,
-        type: "clinic",
-        isOpen: true,
-        openUntil: "9:00 PM",
-        phone: "+91 731 2444444",
-        specialties: ["General Medicine", "Pediatrics"],
-    },
-    {
-        id: "4",
-        name: "LifeCare Pharmacy",
-        address: "Palasia Square, Near HDFC Bank, Indore",
-        distance: 0.3,
-        rating: 4.5,
-        reviewCount: 234,
-        type: "pharmacy",
-        isOpen: true,
-        openUntil: "10:00 PM",
-        phone: "+91 731 2333333",
-        specialties: [],
-    },
-    {
-        id: "5",
-        name: "Dr. Lal PathLabs",
-        address: "Race Course Road, Indore",
-        distance: 1.8,
-        rating: 4.4,
-        reviewCount: 890,
-        type: "lab",
-        isOpen: false,
-        openUntil: "Opens 7:00 AM",
-        phone: "+91 731 2777777",
-        specialties: ["Blood Tests", "Imaging"],
-    },
-    {
-        id: "6",
-        name: "108 Emergency Services",
-        address: "Government Hospital Campus, Indore",
-        distance: 3.2,
-        rating: 4.1,
-        reviewCount: 567,
-        type: "emergency",
-        isOpen: true,
-        openUntil: "24 hours",
-        phone: "108",
-        specialties: ["Emergency", "Trauma"],
-    },
-];
+function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) ** 2;
+    return parseFloat((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2));
+}
+
+function amenityToType(
+    amenity: string | undefined,
+    overrideType?: NearbyHospital["type"]
+): NearbyHospital["type"] {
+    if (overrideType) return overrideType;
+    switch (amenity) {
+        case "hospital": return "hospital";
+        case "clinic":
+        case "doctors": return "clinic";
+        case "pharmacy": return "pharmacy";
+        case "laboratory": return "lab";
+        default: return "hospital";
+    }
+}
+
+function buildAddress(tags: Record<string, string>): string {
+    if (tags["addr:full"]) return tags["addr:full"];
+    const parts = [
+        tags["addr:housenumber"],
+        tags["addr:street"],
+        tags["addr:suburb"],
+        tags["addr:city"] || tags["addr:district"],
+    ].filter(Boolean);
+    return parts.join(", ");
+}
+
+function buildOverpassQuery(type: string, radiusM: number, lat: number, lon: number): string {
+    const around = `around:${radiusM},${lat},${lon}`;
+    let body: string;
+    if (type === "all") {
+        body = `(node["amenity"~"^(hospital|clinic|pharmacy|laboratory|doctors)$"](${around});way["amenity"~"^(hospital|clinic|pharmacy|laboratory|doctors)$"](${around}););`;
+    } else if (type === "emergency") {
+        body = `(node["amenity"="hospital"]["emergency"="yes"](${around});node["emergency"~"yes|ambulance_station"](${around}););`;
+    } else if (type === "lab") {
+        body = `(node["amenity"="laboratory"](${around});node["healthcare"~"^(laboratory|diagnostics)$"](${around});way["amenity"="laboratory"](${around}););`;
+    } else if (type === "clinic") {
+        body = `(node["amenity"~"^(clinic|doctors)$"](${around});way["amenity"~"^(clinic|doctors)$"](${around}););`;
+    } else {
+        body = `(node["amenity"="${type}"](${around});way["amenity"="${type}"](${around}););`;
+    }
+    return `[out:json][timeout:20];${body}out center body;`;
+}
+
+type OverpassElement = {
+    type: string;
+    id: number;
+    lat?: number;
+    lon?: number;
+    center?: { lat: number; lon: number };
+    tags?: Record<string, string>;
+};
+
+async function fetchNearbyFromOSM(
+    lat: number,
+    lon: number,
+    radiusKm: number,
+    type: string
+): Promise<NearbyHospital[]> {
+    const query = buildOverpassQuery(type, radiusKm * 1000, lat, lon);
+    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(25000) });
+    if (!res.ok) throw new Error(`Overpass API error: ${res.status}`);
+    const data: { elements: OverpassElement[] } = await res.json();
+
+    const overrideType = type === "emergency" ? ("emergency" as const) : undefined;
+
+    return data.elements
+        .filter((el) => el.tags?.name)
+        .map((el) => {
+            const elLat = el.lat ?? el.center?.lat ?? 0;
+            const elLon = el.lon ?? el.center?.lon ?? 0;
+            const tags = el.tags ?? {};
+            return {
+                id: `${el.type}-${el.id}`,
+                name: tags.name,
+                address: buildAddress(tags),
+                distance: haversine(lat, lon, elLat, elLon),
+                type: amenityToType(tags.amenity, overrideType),
+                openingHours: tags.opening_hours || "Hours not available",
+                phone: tags.phone || tags["contact:phone"] || tags["contact:mobile"] || "",
+                lat: elLat,
+                lon: elLon,
+            };
+        })
+        .sort((a, b) => a.distance - b.distance);
+}
 
 const facilityTypes = [
     { id: "all", label: "All", icon: Building2 },
@@ -130,9 +149,33 @@ export default function NearMePage() {
     const [locationError, setLocationError] = useState<string | null>(null);
     const [isLoadingLocation, setIsLoadingLocation] = useState(false);
     const [hospitals, setHospitals] = useState<NearbyHospital[]>([]);
+    const [isFetching, setIsFetching] = useState(false);
+    const [fetchError, setFetchError] = useState<string | null>(null);
     const [selectedType, setSelectedType] = useState("all");
     const [viewMode, setViewMode] = useState<"list" | "map">("list");
     const [maxDistance, setMaxDistance] = useState(10);
+
+    const fetchHospitals = useCallback(
+        async (lat: number, lng: number) => {
+            setIsFetching(true);
+            setFetchError(null);
+            try {
+                const results = await fetchNearbyFromOSM(lat, lng, maxDistance, selectedType);
+                setHospitals(results);
+            } catch {
+                setFetchError("Failed to load nearby facilities. Please try again.");
+            } finally {
+                setIsFetching(false);
+            }
+        },
+        [maxDistance, selectedType]
+    );
+
+    useEffect(() => {
+        if (location) {
+            fetchHospitals(location.lat, location.lng);
+        }
+    }, [location, fetchHospitals]);
 
     const requestLocation = () => {
         setIsLoadingLocation(true);
@@ -150,7 +193,6 @@ export default function NearMePage() {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude,
                 });
-                setHospitals(mockHospitals);
                 setIsLoadingLocation(false);
             },
             (error) => {
@@ -169,38 +211,23 @@ export default function NearMePage() {
         );
     };
 
-    const filteredHospitals = hospitals
-        .filter((h) => selectedType === "all" || h.type === selectedType)
-        .filter((h) => h.distance <= maxDistance)
-        .sort((a, b) => a.distance - b.distance);
-
     const getTypeIcon = (type: NearbyHospital["type"]) => {
         switch (type) {
-            case "hospital":
-                return <Building2 className="w-5 h-5" />;
-            case "clinic":
-                return <Stethoscope className="w-5 h-5" />;
-            case "pharmacy":
-                return <Pill className="w-5 h-5" />;
-            case "lab":
-                return <FlaskConical className="w-5 h-5" />;
-            case "emergency":
-                return <Ambulance className="w-5 h-5" />;
+            case "hospital": return <Building2 className="w-5 h-5" />;
+            case "clinic": return <Stethoscope className="w-5 h-5" />;
+            case "pharmacy": return <Pill className="w-5 h-5" />;
+            case "lab": return <FlaskConical className="w-5 h-5" />;
+            case "emergency": return <Ambulance className="w-5 h-5" />;
         }
     };
 
     const getTypeBadgeColor = (type: NearbyHospital["type"]) => {
         switch (type) {
-            case "hospital":
-                return "badge-primary";
-            case "clinic":
-                return "badge-secondary";
-            case "pharmacy":
-                return "badge-accent";
-            case "lab":
-                return "badge-info";
-            case "emergency":
-                return "badge-error";
+            case "hospital": return "badge-primary";
+            case "clinic": return "badge-secondary";
+            case "pharmacy": return "badge-accent";
+            case "lab": return "badge-info";
+            case "emergency": return "badge-error";
         }
     };
 
@@ -318,22 +345,45 @@ export default function NearMePage() {
                         </div>
                     </div>
 
+                    {/* Fetch error */}
+                    {fetchError && (
+                        <div className="alert alert-error mb-4">
+                            <AlertCircle className="w-5 h-5" />
+                            <span>{fetchError}</span>
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => fetchHospitals(location.lat, location.lng)}
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                                Retry
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Loading state */}
+                    {isFetching && (
+                        <div className="flex items-center gap-3 mb-4 text-base-content/60">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            <span>Searching for nearby facilities via OpenStreetMap…</span>
+                        </div>
+                    )}
+
                     <div className="grid lg:grid-cols-3 gap-6">
                         {/* Results List */}
                         <div className={viewMode === "map" ? "lg:col-span-1" : "lg:col-span-3"}>
                             <div className="flex items-center justify-between mb-4">
                                 <h2 className="text-xl font-semibold">
-                                    {filteredHospitals.length} Places Found
+                                    {hospitals.length} Places Found
                                 </h2>
                             </div>
 
                             <div className={`space-y-4 ${viewMode === "list" ? "grid md:grid-cols-2 xl:grid-cols-3 gap-4 space-y-0" : ""}`}>
-                                {filteredHospitals.map((hospital) => (
+                                {hospitals.map((hospital) => (
                                     <div key={hospital.id} className="card bg-base-100 shadow-lg">
                                         <div className="card-body">
                                             <div className="flex items-start justify-between gap-2">
                                                 <div className="flex items-center gap-3">
-                                                    <div className={`p-2 rounded-lg bg-base-200`}>
+                                                    <div className="p-2 rounded-lg bg-base-200">
                                                         {getTypeIcon(hospital.type)}
                                                     </div>
                                                     <div>
@@ -351,49 +401,33 @@ export default function NearMePage() {
                                                 </div>
                                             </div>
 
-                                            <p className="text-sm text-base-content/70 mt-2">
-                                                {hospital.address}
-                                            </p>
-
-                                            <div className="flex items-center gap-4 mt-3 text-sm">
-                                                <div className="flex items-center gap-1">
-                                                    <Star className="w-4 h-4 text-warning fill-warning" />
-                                                    <span className="font-medium">{hospital.rating}</span>
-                                                    <span className="text-base-content/60">
-                                                        ({hospital.reviewCount})
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-1">
-                                                    <Clock className="w-4 h-4" />
-                                                    <span className={hospital.isOpen ? "text-success" : "text-error"}>
-                                                        {hospital.isOpen ? "Open" : "Closed"}
-                                                    </span>
-                                                    <span className="text-base-content/60">
-                                                        · {hospital.openUntil}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {hospital.specialties.length > 0 && (
-                                                <div className="flex flex-wrap gap-1 mt-2">
-                                                    {hospital.specialties.slice(0, 3).map((spec) => (
-                                                        <span key={spec} className="badge badge-outline badge-sm">
-                                                            {spec}
-                                                        </span>
-                                                    ))}
-                                                </div>
+                                            {hospital.address && (
+                                                <p className="text-sm text-base-content/70 mt-2">
+                                                    {hospital.address}
+                                                </p>
                                             )}
 
+                                            <div className="flex items-center gap-2 mt-3 text-sm">
+                                                <Clock className="w-4 h-4 text-base-content/50 shrink-0" />
+                                                <span className="text-base-content/70 text-xs">
+                                                    {hospital.openingHours}
+                                                </span>
+                                            </div>
+
                                             <div className="card-actions justify-between mt-4 pt-3 border-t border-base-200">
+                                                {hospital.phone ? (
+                                                    <a
+                                                        href={`tel:${hospital.phone}`}
+                                                        className="btn btn-ghost btn-sm gap-1"
+                                                    >
+                                                        <Phone className="w-4 h-4" />
+                                                        Call
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-xs text-base-content/40">No phone listed</span>
+                                                )}
                                                 <a
-                                                    href={`tel:${hospital.phone}`}
-                                                    className="btn btn-ghost btn-sm gap-1"
-                                                >
-                                                    <Phone className="w-4 h-4" />
-                                                    Call
-                                                </a>
-                                                <a
-                                                    href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(hospital.address)}`}
+                                                    href={`https://www.google.com/maps/dir/?api=1&destination=${hospital.lat},${hospital.lon}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="btn btn-primary btn-sm gap-1"
@@ -406,13 +440,13 @@ export default function NearMePage() {
                                     </div>
                                 ))}
 
-                                {filteredHospitals.length === 0 && (
+                                {!isFetching && hospitals.length === 0 && (
                                     <div className="col-span-full card bg-base-100 shadow-lg">
                                         <div className="card-body items-center text-center py-12">
                                             <MapPin className="w-12 h-12 text-base-content/20 mb-4" />
                                             <h3 className="text-lg font-semibold">No places found</h3>
                                             <p className="text-base-content/60">
-                                                Try adjusting your filters or increasing the distance
+                                                Try adjusting your filters or increasing the search radius
                                             </p>
                                         </div>
                                     </div>
@@ -423,25 +457,12 @@ export default function NearMePage() {
                         {/* Map View */}
                         {viewMode === "map" && (
                             <div className="lg:col-span-2">
-                                <div className="card bg-base-100 shadow-lg h-150 sticky top-24">
-                                    <div className="card-body items-center justify-center">
-                                        <Map className="w-16 h-16 text-base-content/20 mb-4" />
-                                        <h3 className="text-lg font-semibold">Map View</h3>
-                                        <p className="text-base-content/60 text-center">
-                                            Google Maps integration coming soon.
-                                            <br />
-                                            Enable with your Google Maps API key.
-                                        </p>
-                                        <a
-                                            href={`https://www.google.com/maps/search/hospitals+near+${location.lat},${location.lng}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="btn btn-primary mt-4"
-                                        >
-                                            Open in Google Maps
-                                            <ArrowRight className="w-4 h-4" />
-                                        </a>
-                                    </div>
+                                <div className="card bg-base-100 shadow-lg sticky top-24 overflow-hidden" style={{ height: "600px" }}>
+                                    <NearMeMap
+                                        userLat={location.lat}
+                                        userLng={location.lng}
+                                        hospitals={hospitals}
+                                    />
                                 </div>
                             </div>
                         )}
