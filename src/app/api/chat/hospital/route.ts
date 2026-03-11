@@ -1,52 +1,62 @@
 import { NextResponse } from "next/server";
-
-export async function POST(_req: Request) {
-    return NextResponse.json({
-        text: "The AI assistant is temporarily unavailable. Please use the search and filters above to find hospitals.",
-    });
-}
-
-/* ── AI chatbot (temporarily disabled) ────────────────────────────────────────
 import { GoogleGenAI } from "@google/genai";
 import { searchHospitals } from "@/lib/searchHospitals";
+
+function buildInsightPrompt(
+    searchContext: { query?: string | null; state?: string | null; district?: string | null; pincode?: string | null },
+    hospitals: Array<Record<string, unknown>>
+): string {
+    const location = [searchContext.district, searchContext.state].filter(Boolean).join(", ") || searchContext.pincode || "your area";
+    const query = searchContext.query || "hospitals";
+
+    const summaries = hospitals.slice(0, 8).map((h) => {
+        const fees = Array.isArray(h.consultation_fee_range)
+            ? `₹${(h.consultation_fee_range as number[])[0]}–₹${(h.consultation_fee_range as number[])[1]}`
+            : "price not listed";
+        return `- ${h.name} (${h.type ?? "Hospital"}, ${h.district ?? h.city ?? ""}): consultation ${fees}, beds: ${h.beds ?? "N/A"}, insurance: ${h.accepts_insurance ? "yes" : "no"}, emergency: ${h.has_emergency ? "yes" : "no"}`;
+    }).join("\n");
+
+    return `You are MedMap's AI Insight engine. Your job is to give a SHORT, price-focused summary of hospital search results.
+
+Search: "${query}" in ${location}
+Results (${hospitals.length} total, showing up to 8):
+${summaries || "No hospitals found in the database for this search."}
+
+Your response MUST:
+1. Open with a one-line price range overview (e.g., "Consultation fees range from ₹300 to ₹1,500 in this area.")
+2. Highlight the most affordable option and the highest-rated option if they differ
+3. Mention insurance acceptance rate (X out of Y accept insurance)
+4. Note emergency availability if relevant
+5. End with one actionable tip (e.g., "Filter by insurance" or "Sort by price to find the cheapest option")
+6. Use **bold** for hospital names and prices
+7. Keep total length under 120 words — be punchy, not verbose
+8. Never say "JSON", "database", or "search results"; speak as if you know this area naturally
+`;
+}
 
 export async function POST(req: Request) {
     try {
         const { message, searchParams } = await req.json();
 
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            return NextResponse.json({ text: "AI insights require a GEMINI_API_KEY environment variable." });
+        }
+
         const searchResults = await searchHospitals({
-            query: searchParams.query,
-            state: searchParams.state,
-            district: searchParams.district,
-            pincode: searchParams.pincode,
-            limit: 5,
+            query: searchParams?.query,
+            state: searchParams?.state,
+            district: searchParams?.district,
+            pincode: searchParams?.pincode,
+            limit: 8,
         });
 
-        const context = JSON.stringify(searchResults.results);
+        const prompt = buildInsightPrompt(searchParams ?? {}, searchResults.results as Array<Record<string, unknown>>);
 
-        const prompt = `
-        You are an AI assistant for MedMap, helping users find hospitals.
-        
-        User Query: "${message}"
-        
-        Here are the relevant hospital search results found in our database based on the user's current view:
-        ${context}
-        
-        Instructions:
-        1. Answer the user's query using ONLY the information provided in the search results above.
-        2. If the user asks for a recommendation, suggest hospitals from the list based on their specific needs (e.g., location, type).
-        3. Highlight key details like address, phone number, or emergency number if relevant.
-        4. If the search results are empty or don't contain the answer, politely state that you couldn't find relevant information in the current search results.
-        5. Keep the response concise, helpful, and friendly.
-        6. Do not mention "JSON" or "database" in your response; speak naturally.
-        `;
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) throw new Error("Chatbot api key not configured");
         const ai = new GoogleGenAI({ apiKey });
-
         const resp = await ai.models.generateContent({
-            model: "gemini-2.5-flash-lite",
-            contents: prompt,
+            model: "gemma-3-27b",
+            contents: prompt + (message ? `\n\nUser also asked: "${message}"` : ""),
         });
 
         return NextResponse.json({ text: resp.text });
@@ -55,4 +65,3 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Failed to generate response" }, { status: 500 });
     }
 }
-── end disabled block ──────────────────────────────────────────────────────── */
