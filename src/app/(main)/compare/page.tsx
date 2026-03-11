@@ -16,7 +16,7 @@ import {
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
 interface CompareHospital {
-  id: number;
+  id: string;
   name: string;
   state: string;
   district: string;
@@ -68,7 +68,7 @@ function ComparePageContent() {
     fetchCompare(inputIds);
   };
 
-  const removeHospital = (id: number) => {
+  const removeHospital = (id: string) => {
     setHospitals(hospitals.filter((h) => h.id !== id));
   };
 
@@ -104,14 +104,14 @@ function ComparePageContent() {
           <div>
             <h1 className="text-3xl font-bold">Compare Hospitals</h1>
             <p className="text-base-content/60">
-              Enter hospital Sr_No IDs separated by commas to compare
+              Enter hospital IDs separated by commas to compare
             </p>
           </div>
 
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="e.g., 1,2,3"
+              placeholder="e.g., HOSP00001,HOSP00002"
               className="input input-bordered input-sm w-48"
               value={inputIds}
               onChange={(e) => setInputIds(e.target.value)}
