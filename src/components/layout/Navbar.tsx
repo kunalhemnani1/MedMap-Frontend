@@ -12,6 +12,7 @@ import {
     LogIn,
     LogOut,
     Menu,
+    Mic,
     Moon,
     Search,
     Shield,
@@ -187,6 +188,19 @@ export default function Navbar() {
 
                     {session?.user ? (
                         <>
+                            {/* Record Visit — patients only */}
+                            {userRole === "user" && (
+                                <Link
+                                    href="/record-visit"
+                                    className="btn btn-sm gap-2 border border-error text-error hover:bg-error hover:text-white transition-colors"
+                                >
+                                    <span className="relative flex h-2.5 w-2.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75" />
+                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-error" />
+                                    </span>
+                                    Record Visit
+                                </Link>
+                            )}
                             <Link href={dashboardHref} className="btn btn-ghost btn-circle">
                                 <User className="w-5 h-5" />
                             </Link>
@@ -272,6 +286,20 @@ export default function Navbar() {
                         <div className="px-4 pb-6 flex flex-col gap-2">
                             {session?.user ? (
                                 <>
+                                    {userRole === "user" && (
+                                        <Link
+                                            href="/record-visit"
+                                            onClick={() => setMobileMenuOpen(false)}
+                                            className="btn btn-outline btn-error justify-start gap-3"
+                                        >
+                                            <span className="relative flex h-2.5 w-2.5">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75" />
+                                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-error" />
+                                            </span>
+                                            <Mic className="w-4 h-4" />
+                                            Record Visit
+                                        </Link>
+                                    )}
                                     <Link
                                         href={dashboardHref}
                                         onClick={() => setMobileMenuOpen(false)}
