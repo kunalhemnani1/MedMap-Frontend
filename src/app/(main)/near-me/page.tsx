@@ -1,7 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
+import { saveNearby, getNearby, getNearbyStale } from "@/lib/offlineDB";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import {
+    type NearbyFacility,
+    fetchNearbyFromOSM,
+} from "@/lib/nearbyFacilities";
 import {
     MapPin,
     Navigation,
@@ -19,121 +25,14 @@ import {
     Pill,
     FlaskConical,
     Ambulance,
+    WifiOff,
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
 const NearMeMap = dynamic(() => import("./NearMeMap"), { ssr: false });
 
-interface NearbyHospital {
-    id: string;
-    name: string;
-    address: string;
-    distance: number;
-    type: "hospital" | "clinic" | "pharmacy" | "lab" | "emergency";
-    openingHours: string;
-    phone: string;
-    lat: number;
-    lon: number;
-}
-
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) ** 2;
-    return parseFloat((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2));
-}
-
-function amenityToType(
-    amenity: string | undefined,
-    overrideType?: NearbyHospital["type"]
-): NearbyHospital["type"] {
-    if (overrideType) return overrideType;
-    switch (amenity) {
-        case "hospital": return "hospital";
-        case "clinic":
-        case "doctors": return "clinic";
-        case "pharmacy": return "pharmacy";
-        case "laboratory": return "lab";
-        default: return "hospital";
-    }
-}
-
-function buildAddress(tags: Record<string, string>): string {
-    if (tags["addr:full"]) return tags["addr:full"];
-    const parts = [
-        tags["addr:housenumber"],
-        tags["addr:street"],
-        tags["addr:suburb"],
-        tags["addr:city"] || tags["addr:district"],
-    ].filter(Boolean);
-    return parts.join(", ");
-}
-
-function buildOverpassQuery(type: string, radiusM: number, lat: number, lon: number): string {
-    const around = `around:${radiusM},${lat},${lon}`;
-    let body: string;
-    if (type === "all") {
-        body = `(node["amenity"~"^(hospital|clinic|pharmacy|laboratory|doctors)$"](${around});way["amenity"~"^(hospital|clinic|pharmacy|laboratory|doctors)$"](${around}););`;
-    } else if (type === "emergency") {
-        body = `(node["amenity"="hospital"]["emergency"="yes"](${around});node["emergency"~"yes|ambulance_station"](${around}););`;
-    } else if (type === "lab") {
-        body = `(node["amenity"="laboratory"](${around});node["healthcare"~"^(laboratory|diagnostics)$"](${around});way["amenity"="laboratory"](${around}););`;
-    } else if (type === "clinic") {
-        body = `(node["amenity"~"^(clinic|doctors)$"](${around});way["amenity"~"^(clinic|doctors)$"](${around}););`;
-    } else {
-        body = `(node["amenity"="${type}"](${around});way["amenity"="${type}"](${around}););`;
-    }
-    return `[out:json][timeout:20];${body}out center body;`;
-}
-
-type OverpassElement = {
-    type: string;
-    id: number;
-    lat?: number;
-    lon?: number;
-    center?: { lat: number; lon: number };
-    tags?: Record<string, string>;
-};
-
-async function fetchNearbyFromOSM(
-    lat: number,
-    lon: number,
-    radiusKm: number,
-    type: string
-): Promise<NearbyHospital[]> {
-    const query = buildOverpassQuery(type, radiusKm * 1000, lat, lon);
-    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(25000) });
-    if (!res.ok) throw new Error(`Overpass API error: ${res.status}`);
-    const data: { elements: OverpassElement[] } = await res.json();
-
-    const overrideType = type === "emergency" ? ("emergency" as const) : undefined;
-
-    return data.elements
-        .filter((el) => el.tags?.name)
-        .map((el) => {
-            const elLat = el.lat ?? el.center?.lat ?? 0;
-            const elLon = el.lon ?? el.center?.lon ?? 0;
-            const tags = el.tags ?? {};
-            return {
-                id: `${el.type}-${el.id}`,
-                name: tags.name,
-                address: buildAddress(tags),
-                distance: haversine(lat, lon, elLat, elLon),
-                type: amenityToType(tags.amenity, overrideType),
-                openingHours: tags.opening_hours || "Hours not available",
-                phone: tags.phone || tags["contact:phone"] || tags["contact:mobile"] || "",
-                lat: elLat,
-                lon: elLon,
-            };
-        })
-        .sort((a, b) => a.distance - b.distance);
-}
+// NearbyHospital is an alias for the shared type
+type NearbyHospital = NearbyFacility;
 
 const facilityTypes = [
     { id: "all", label: "All", icon: Building2 },
@@ -148,22 +47,50 @@ export default function NearMePage() {
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [locationError, setLocationError] = useState<string | null>(null);
     const [isLoadingLocation, setIsLoadingLocation] = useState(false);
-    const [hospitals, setHospitals] = useState<NearbyHospital[]>([]);
+    const [hospitals, setHospitals] = useState<NearbyFacility[]>([]);
     const [isFetching, setIsFetching] = useState(false);
     const [fetchError, setFetchError] = useState<string | null>(null);
     const [selectedType, setSelectedType] = useState("all");
     const [viewMode, setViewMode] = useState<"list" | "map">("list");
     const [maxDistance, setMaxDistance] = useState(10);
+    const [cachedAt, setCachedAt] = useState<number | null>(null);
+    const isOnline = useOnlineStatus();
+    const prevOnlineRef = useRef(true);
 
     const fetchHospitals = useCallback(
         async (lat: number, lng: number) => {
             setIsFetching(true);
             setFetchError(null);
+            setCachedAt(null);
+
+            // Offline or network unavailable: serve from IndexedDB immediately
+            if (!navigator.onLine) {
+                const cached = await getNearby<NearbyFacility>(lat, lng, selectedType, maxDistance)
+                    ?? await getNearbyStale<NearbyFacility>(lat, lng, selectedType, maxDistance);
+                if (cached) {
+                    setHospitals(cached.hospitals);
+                    setCachedAt(cached.savedAt);
+                } else {
+                    setHospitals([]);
+                    setFetchError("You're offline and no cached data is available for this area yet. Connect to the internet once to enable offline support.");
+                }
+                setIsFetching(false);
+                return;
+            }
+
             try {
                 const results = await fetchNearbyFromOSM(lat, lng, maxDistance, selectedType);
                 setHospitals(results);
+                saveNearby(lat, lng, selectedType, maxDistance, results);
             } catch {
-                setFetchError("Failed to load nearby facilities. Please try again.");
+                // Network failed mid-request — fall back to IndexedDB
+                const stale = await getNearbyStale<NearbyFacility>(lat, lng, selectedType, maxDistance);
+                if (stale) {
+                    setHospitals(stale.hospitals);
+                    setCachedAt(stale.savedAt);
+                } else {
+                    setFetchError("Failed to load nearby facilities. Please try again.");
+                }
             } finally {
                 setIsFetching(false);
             }
@@ -171,11 +98,49 @@ export default function NearMePage() {
         [maxDistance, selectedType]
     );
 
+    // On mount: restore last known location from localStorage, then either
+    // serve cache (offline) or kick off a fresh fetch (online).
     useEffect(() => {
-        if (location) {
+        const stored = localStorage.getItem("medmap-last-location");
+        if (stored) {
+            try {
+                const { lat, lng } = JSON.parse(stored) as { lat: number; lng: number };
+                setLocation({ lat, lng });
+                return; // fetchHospitals triggered by the location effect below
+            } catch {
+                localStorage.removeItem("medmap-last-location");
+            }
+        }
+
+        // No stored location — silently try to get it if permission is already granted
+        if (!navigator.permissions || !navigator.geolocation) return;
+        navigator.permissions.query({ name: "geolocation" }).then((status) => {
+            if (status.state !== "granted") return;
+            setIsLoadingLocation(true);
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    localStorage.setItem("medmap-last-location", JSON.stringify(coords));
+                    setLocation(coords);
+                    setIsLoadingLocation(false);
+                },
+                () => setIsLoadingLocation(false),
+                { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
+            );
+        });
+    }, []);
+
+    useEffect(() => {
+        if (location) fetchHospitals(location.lat, location.lng);
+    }, [location, fetchHospitals]);
+
+    // Auto-refetch when connection is restored while showing cached data
+    useEffect(() => {
+        if (isOnline && !prevOnlineRef.current && location && cachedAt !== null) {
             fetchHospitals(location.lat, location.lng);
         }
-    }, [location, fetchHospitals]);
+        prevOnlineRef.current = isOnline;
+    }, [isOnline, location, cachedAt, fetchHospitals]);
 
     const requestLocation = () => {
         setIsLoadingLocation(true);
@@ -189,10 +154,12 @@ export default function NearMePage() {
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                setLocation({
+                const coords = {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude,
-                });
+                };
+                localStorage.setItem("medmap-last-location", JSON.stringify(coords));
+                setLocation(coords);
                 setIsLoadingLocation(false);
             },
             (error) => {
@@ -375,6 +342,12 @@ export default function NearMePage() {
                                 <h2 className="text-xl font-semibold">
                                     {hospitals.length} Places Found
                                 </h2>
+                                {cachedAt !== null && (
+                                    <span className="badge badge-warning gap-1 text-xs">
+                                        <WifiOff className="w-3 h-3" />
+                                        Cached &middot; {cachedAt ? new Date(cachedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                                    </span>
+                                )}
                             </div>
 
                             <div className={`space-y-4 ${viewMode === "list" ? "grid md:grid-cols-2 xl:grid-cols-3 gap-4 space-y-0" : ""}`}>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="#2563eb"/>
+  <!-- Map pin body -->
+  <path d="M256 96c-66.3 0-120 53.7-120 120 0 45.6 25.3 85.4 62.7 106.2L256 416l57.3-93.8C350.7 301.4 376 261.6 376 216c0-66.3-53.7-120-120-120z" fill="white"/>
+  <!-- Map pin circle cutout -->
+  <circle cx="256" cy="216" r="48" fill="#2563eb"/>
+  <!-- Medical cross inside -->
+  <rect x="244" y="196" width="24" height="40" rx="4" fill="white"/>
+  <rect x="236" y="204" width="40" height="24" rx="4" fill="white"/>
+</svg>
