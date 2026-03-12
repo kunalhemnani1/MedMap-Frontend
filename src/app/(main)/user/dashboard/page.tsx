@@ -16,6 +16,10 @@ import {
     Calendar,
     ChevronRight,
     ClipboardList,
+    Star,
+    ShieldCheck,
+    MessageSquare,
+    X,
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 import { useSession, signOut } from "@/lib/auth-client";
@@ -39,6 +43,22 @@ interface Appointment {
     doctor: { id: string; name: string; specialty: string } | null;
 }
 
+interface ReviewToken {
+    token: string;
+    hospitalId: string;
+    hospital?: { name: string };
+    appointmentId: string;
+}
+
+const RATING_LABELS = ["Terrible", "Poor", "Average", "Good", "Excellent"];
+const RATING_CATEGORIES = [
+    { key: "ratingWaiting", label: "Waiting Time" },
+    { key: "ratingCommunication", label: "Doctor Communication" },
+    { key: "ratingStaff", label: "Staff Behavior" },
+    { key: "ratingCleanliness", label: "Cleanliness" },
+    { key: "ratingOverall", label: "Overall Experience" },
+] as const;
+
 const tabs = [
     { id: "overview", label: "Overview", icon: User },
     { id: "bookings", label: "Bookings", icon: Calendar },
@@ -54,6 +74,19 @@ export default function DashboardPage() {
     const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [loading, setLoading] = useState(true);
+    const [reviewTokens, setReviewTokens] = useState<ReviewToken[]>([]);
+    const [reviewingAppt, setReviewingAppt] = useState<Appointment | null>(null);
+    const [reviewForm, setReviewForm] = useState({
+        authorName: "",
+        comment: "",
+        ratingWaiting: 0,
+        ratingCommunication: 0,
+        ratingStaff: 0,
+        ratingCleanliness: 0,
+        ratingOverall: 0,
+    });
+    const [reviewSubmitting, setReviewSubmitting] = useState(false);
+    const [reviewResult, setReviewResult] = useState("");
 
     useEffect(() => {
         if (!isPending && !session?.user) {
@@ -72,7 +105,21 @@ export default function DashboardPage() {
                     fetch("/api/appointments").then((r) => r.json()).catch(() => ({ appointments: [] })),
                 ]);
                 setBookmarks(bkRes.bookmarks || []);
-                setAppointments(apptRes.appointments || []);
+                const appts = apptRes.appointments || [];
+                setAppointments(appts);
+
+                // Fetch review tokens for completed appointments
+                const completed = appts.filter((a: Appointment) => a.status === "completed");
+                const tokenResults: ReviewToken[] = [];
+                for (const appt of completed) {
+                    if (!appt.hospital?.id) continue;
+                    try {
+                        const tokenRes = await fetch(`/api/review-token?hospitalId=${appt.hospital.id}`);
+                        const data = await tokenRes.json();
+                        if (data.token) tokenResults.push({ ...data.token, hospital: appt.hospital, appointmentId: appt.id });
+                    } catch { /* skip */ }
+                }
+                setReviewTokens(tokenResults);
             } finally {
                 setLoading(false);
             }
@@ -99,6 +146,42 @@ export default function DashboardPage() {
         .slice(0, 2);
 
     const upcomingAppointments = appointments.filter((a) => a.status === "confirmed" || a.status === "pending");
+
+    const openReviewForm = (appt: Appointment) => {
+        setReviewingAppt(appt);
+        setReviewForm({ authorName: user.name || "", comment: "", ratingWaiting: 0, ratingCommunication: 0, ratingStaff: 0, ratingCleanliness: 0, ratingOverall: 0 });
+        setReviewResult("");
+    };
+
+    const submitReview = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!reviewingAppt?.hospital) return;
+        const token = reviewTokens.find(t => t.hospitalId === reviewingAppt.hospital!.id);
+        setReviewSubmitting(true);
+        setReviewResult("");
+        try {
+            const res = await fetch(`/api/hospitals/${reviewingAppt.hospital.id}/reviews`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ...reviewForm,
+                    reviewToken: token?.token || undefined,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setReviewResult("Review submitted! Thank you for your feedback.");
+                setReviewTokens(prev => prev.filter(t => t.hospitalId !== reviewingAppt.hospital!.id));
+                setTimeout(() => setReviewingAppt(null), 2000);
+            } else {
+                setReviewResult(data.error || "Failed to submit review.");
+            }
+        } catch {
+            setReviewResult("Network error. Please try again.");
+        } finally {
+            setReviewSubmitting(false);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-base-200">
@@ -187,6 +270,35 @@ export default function DashboardPage() {
                                         <div className="stat-value text-success">{upcomingAppointments.length}</div>
                                     </div>
                                 </div>
+
+                                {/* Pending Review Prompts */}
+                                {reviewTokens.length > 0 && (
+                                    <div className="card bg-base-100 shadow-lg border-l-4 border-success">
+                                        <div className="card-body">
+                                            <h3 className="card-title text-success"><MessageSquare className="w-5 h-5" /> Leave a Review</h3>
+                                            <p className="text-sm text-base-content/60 mb-2">
+                                                You have completed visits awaiting your feedback. Verified reviews help other patients!
+                                            </p>
+                                            <div className="space-y-2">
+                                                {reviewTokens.map(token => {
+                                                    const appt = appointments.find(a => a.id === token.appointmentId);
+                                                    return (
+                                                        <div key={token.token} className="flex items-center justify-between p-3 bg-base-200 rounded-lg">
+                                                            <div>
+                                                                <p className="font-medium">{token.hospital?.name ?? "Hospital"}</p>
+                                                                <p className="text-sm text-base-content/60">{appt?.procedure}</p>
+                                                                <span className="badge badge-success badge-sm gap-1"><ShieldCheck className="w-3 h-3" /> Verified Visit</span>
+                                                            </div>
+                                                            <button className="btn btn-success btn-sm" onClick={() => appt && openReviewForm(appt)}>
+                                                                <Star className="w-4 h-4" /> Rate Now
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {upcomingAppointments.length > 0 && (
                                     <div className="card bg-base-100 shadow-lg">
@@ -367,6 +479,68 @@ export default function DashboardPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Review Modal */}
+            {reviewingAppt && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="card bg-base-100 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                        <div className="card-body">
+                            <div className="flex items-center justify-between">
+                                <h3 className="card-title"><Star className="w-5 h-5 text-warning" /> Rate Your Visit</h3>
+                                <button className="btn btn-ghost btn-sm btn-circle" onClick={() => setReviewingAppt(null)}><X className="w-4 h-4" /></button>
+                            </div>
+                            <p className="text-sm text-base-content/60">{reviewingAppt.hospital?.name} — {reviewingAppt.procedure}</p>
+                            {reviewTokens.find(t => t.hospitalId === reviewingAppt.hospital?.id) && (
+                                <div className="badge badge-success gap-1 mt-1"><ShieldCheck className="w-3 h-3" /> Verified Visit — Your review will carry a verified badge</div>
+                            )}
+                            <form onSubmit={submitReview} className="space-y-4 mt-3">
+                                <div className="form-control">
+                                    <label className="label"><span className="label-text">Your Name</span></label>
+                                    <input type="text" required className="input input-bordered" value={reviewForm.authorName} onChange={e => setReviewForm(f => ({ ...f, authorName: e.target.value }))} />
+                                </div>
+
+                                {/* 5-category star ratings */}
+                                <div className="space-y-3">
+                                    {RATING_CATEGORIES.map(cat => (
+                                        <div key={cat.key} className="form-control">
+                                            <label className="label py-1"><span className="label-text font-medium">{cat.label}</span></label>
+                                            <div className="flex items-center gap-1">
+                                                {[1, 2, 3, 4, 5].map(n => (
+                                                    <button
+                                                        key={n}
+                                                        type="button"
+                                                        className="btn btn-ghost btn-xs p-0"
+                                                        onClick={() => setReviewForm(f => ({ ...f, [cat.key]: n }))}
+                                                    >
+                                                        <Star className={`w-6 h-6 ${n <= reviewForm[cat.key] ? "text-warning fill-warning" : "text-base-content/20"}`} />
+                                                    </button>
+                                                ))}
+                                                <span className="text-sm ml-2 text-base-content/60">
+                                                    {reviewForm[cat.key] > 0 ? RATING_LABELS[reviewForm[cat.key] - 1] : "Not rated"}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="form-control">
+                                    <label className="label"><span className="label-text">Your Feedback</span></label>
+                                    <textarea className="textarea textarea-bordered h-24" placeholder="Tell us about your experience..." value={reviewForm.comment} onChange={e => setReviewForm(f => ({ ...f, comment: e.target.value }))} />
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    <button type="submit" className="btn btn-primary" disabled={reviewSubmitting || reviewForm.ratingOverall === 0}>
+                                        {reviewSubmitting ? <span className="loading loading-spinner loading-sm" /> : "Submit Review"}
+                                    </button>
+                                </div>
+                                {reviewResult && (
+                                    <div className={`alert ${reviewResult.startsWith("Review submitted") ? "alert-success" : "alert-error"}`}>{reviewResult}</div>
+                                )}
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

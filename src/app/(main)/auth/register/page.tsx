@@ -35,7 +35,8 @@ export default function RegisterPage() {
             if (result.error) {
                 setError(result.error.message || "Registration failed");
             } else {
-                router.push("/user/dashboard");
+                const dest = role === "admin" ? "/admin/dashboard" : role === "doctor" ? "/doctor/dashboard" : "/user/dashboard";
+                router.push(dest);
             }
         } catch {
             setError("Something went wrong. Please try again.");
@@ -74,8 +75,8 @@ export default function RegisterPage() {
                                         type="button"
                                         onClick={() => setRole(r.id)}
                                         className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${role === r.id
-                                                ? "border-primary bg-primary/5 text-primary"
-                                                : "border-base-200 hover:border-primary/40"
+                                            ? "border-primary bg-primary/5 text-primary"
+                                            : "border-base-200 hover:border-primary/40"
                                             }`}
                                     >
                                         <r.icon className="w-5 h-5" />

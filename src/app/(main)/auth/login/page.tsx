@@ -22,7 +22,9 @@ export default function LoginPage() {
             if (result.error) {
                 setError(result.error.message || "Login failed");
             } else {
-                router.push("/user/dashboard");
+                const role = (result.data?.user as { role?: string } | undefined)?.role;
+                const dest = role === "admin" ? "/admin/dashboard" : role === "doctor" ? "/doctor/dashboard" : "/user/dashboard";
+                router.push(dest);
             }
         } catch {
             setError("Something went wrong. Please try again.");
