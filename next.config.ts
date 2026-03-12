@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   reactCompiler: true,
+  serverExternalPackages: ["node-record-lpcm16"],
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },

@@ -200,7 +200,7 @@ export default function AdminDashboard() {
     if (!session?.user || userRole !== "admin") return null;
 
     const user = session.user;
-    const initials = (user.name || "A").split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2);
+    const avatarLetter = (user.name?.trim()?.[0] || "A").toUpperCase();
 
     const filteredHospitals = hospitals.filter(h => {
         const matchesFilter = hospitalFilter === "all" ? true : hospitalFilter === "verified" ? h.isVerified : !h.isVerified;
@@ -224,13 +224,13 @@ export default function AdminDashboard() {
                                 <div className="flex items-center gap-4 mb-6">
                                     <div className="avatar placeholder">
                                         <div className="bg-error text-error-content rounded-full w-16">
-                                            <span className="text-xl">{initials}</span>
+                                            <span className="text-xl">{avatarLetter}</span>
                                         </div>
                                     </div>
                                     <div>
                                         <h2 className="font-semibold text-lg">{user.name}</h2>
                                         <p className="text-sm text-base-content/60">{user.email}</p>
-                                        <span className="badge badge-error badge-sm mt-1">Admin</span>
+                                        <span className="badge badge-error mt-2 px-3 py-1">Admin</span>
                                     </div>
                                 </div>
                                 <ul className="menu p-0 gap-1">

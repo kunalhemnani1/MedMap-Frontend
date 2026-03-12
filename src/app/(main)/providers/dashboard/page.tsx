@@ -76,6 +76,7 @@ export default function ProviderDashboardPage() {
     const role = (user as any).role || "user";
     const isDoctor = role === "doctor";
     const isAdmin = role === "admin";
+    const avatarLetter = (user.name?.trim()?.[0] || "U").toUpperCase();
 
     const todayBookings = bookings.filter((b) => b.status === "Confirmed" || b.status === "Pending");
     const completedBookings = bookings.filter((b) => b.status === "Completed");
@@ -94,13 +95,13 @@ export default function ProviderDashboardPage() {
                                 <div className="flex items-center gap-4 mb-6">
                                     <div className="avatar placeholder">
                                         <div className="bg-secondary text-secondary-content rounded-full w-16">
-                                            {isDoctor ? <Stethoscope className="w-7 h-7" /> : <Building2 className="w-7 h-7" />}
+                                            <span className="text-xl">{avatarLetter}</span>
                                         </div>
                                     </div>
                                     <div>
                                         <h2 className="font-semibold text-lg">{user.name}</h2>
                                         <p className="text-sm text-base-content/60">{user.email}</p>
-                                        <span className="badge badge-secondary badge-sm mt-1 capitalize">{role}</span>
+                                        <span className="badge badge-secondary mt-2 px-3 py-1 capitalize">{role}</span>
                                     </div>
                                 </div>
 
@@ -131,7 +132,7 @@ export default function ProviderDashboardPage() {
                     <div className="lg:col-span-3 space-y-6">
                         {activeTab === "overview" && (
                             <>
-                                <div className="card bg-linear-to-r from-secondary to-accent text-secondary-content">
+                                <div className="card bg-linear-to-r from-secondary to-accent text-white">
                                     <div className="card-body">
                                         <h2 className="card-title text-2xl">
                                             {isDoctor ? "Doctor" : "Hospital Admin"} Dashboard
@@ -233,8 +234,8 @@ export default function ProviderDashboardPage() {
                                                             <td>Dr. {b.doctor_name}</td>
                                                             <td>
                                                                 <span className={`badge badge-sm ${b.status === "Confirmed" ? "badge-success" :
-                                                                        b.status === "Cancelled" ? "badge-error" :
-                                                                            b.status === "Completed" ? "badge-info" : "badge-warning"
+                                                                    b.status === "Cancelled" ? "badge-error" :
+                                                                        b.status === "Completed" ? "badge-info" : "badge-warning"
                                                                     }`}>{b.status}</span>
                                                             </td>
                                                             <td>₹{b.estimated_cost?.toLocaleString("en-IN")}</td>

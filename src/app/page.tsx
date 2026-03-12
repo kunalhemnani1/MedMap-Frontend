@@ -85,10 +85,10 @@ export default function Home() {
               />
               <button
                 type="submit"
-                className="absolute right-4 top-1/2 -translate-y-1/2 h-14 w-14 rounded-full bg-primary text-white flex items-center justify-center shadow-lg"
+                className="absolute right-4 top-1/2 -translate-y-1/2 h-14 w-14 rounded-full bg-white text-black flex items-center justify-center shadow-lg"
                 aria-label="Search"
               >
-                <Search className="w-5 h-5" />
+                <Search className="w-5 h-5 text-black" />
               </button>
             </div>
           </form>

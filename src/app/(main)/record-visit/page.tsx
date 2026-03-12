@@ -37,25 +37,6 @@ interface VisitDetails {
     notes: string;
 }
 
-// Web Speech API types (not in standard TS lib)
-interface SpeechRecognitionEvent extends Event {
-    results: SpeechRecognitionResultList;
-    resultIndex: number;
-}
-interface SpeechRecognitionErrorEvent extends Event {
-    error: string;
-}
-interface SpeechRecognitionInstance extends EventTarget {
-    continuous: boolean;
-    interimResults: boolean;
-    lang: string;
-    start(): void;
-    stop(): void;
-    onresult: ((e: SpeechRecognitionEvent) => void) | null;
-    onerror: ((e: SpeechRecognitionErrorEvent) => void) | null;
-    onend: (() => void) | null;
-}
-
 const EMPTY_DETAILS: VisitDetails = {
     doctorName: "",
     doctorSpecialty: "",
@@ -78,185 +59,246 @@ export default function RecordVisitPage() {
     const { data: session, isPending } = useSession();
     const userRole = (session?.user as { role?: string } | undefined)?.role;
 
+    /* ── phase & form ─────────────────────────────────────── */
+    const [phase, setPhase] = useState<Phase>("consent");
+    const [details, setDetails] = useState<VisitDetails>(EMPTY_DETAILS);
+    const [consentChecked, setConsentChecked] = useState(false);
+
+    /* ── recording state ──────────────────────────────────── */
+    const [isRecording, setIsRecording] = useState(false);
+    const isRecordingRef = useRef(false);
+    const [elapsed, setElapsed] = useState(0);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    /* ── transcript ───────────────────────────────────────── */
+    const [finalTranscript, setFinalTranscript] = useState("");
+    const [interimTranscript, setInterimTranscript] = useState("");
+    const liveBoxRef = useRef<HTMLDivElement>(null);
+
+    /* ── summary / processing ─────────────────────────────── */
+    const [summary, setSummary] = useState("");
+    const [processingStep, setProcessingStep] = useState("Analysing transcript…");
+    const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+
+    /* ── errors ───────────────────────────────────────────── */
+    const [micError, setMicError] = useState("");
+    const [apiError, setApiError] = useState("");
+
+    /* ── AssemblyAI session id ────────────────────────────── */
+    const visitIdRef = useRef<string | null>(null);
+
+    /* ── auth guard ───────────────────────────────────────── */
     useEffect(() => {
         if (!isPending && session?.user && userRole !== "user") router.replace("/");
     }, [isPending, session, userRole, router]);
 
-    const [phase, setPhase] = useState<Phase>("consent");
-    const [details, setDetails] = useState<VisitDetails>(EMPTY_DETAILS);
-    const [consentChecked, setConsentChecked] = useState(false);
-    const [micError, setMicError] = useState("");
-
-    // Recording
-    const [isRecording, setIsRecording] = useState(false);
-    const [elapsed, setElapsed] = useState(0);
-    // finalTranscript is committed text; interimTranscript is live partial text
-    const [finalTranscript, setFinalTranscript] = useState("");
-    const [interimTranscript, setInterimTranscript] = useState("");
-
-    // Summary
-    const [summary, setSummary] = useState("");
-    const [processingStep, setProcessingStep] = useState("");
-    const [apiError, setApiError] = useState("");
-    const [transcriptExpanded, setTranscriptExpanded] = useState(false);
-
-    const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-    const timerRef = useRef<NodeJS.Timeout | null>(null);
-    const liveBoxRef = useRef<HTMLDivElement>(null);
-
-    // Prefill patient name
+    /* ── auto-scroll live captions ────────────────────────── */
     useEffect(() => {
-        if (session?.user?.name) setDetails(d => ({ ...d, patientName: d.patientName || session.user.name || "" }));
-    }, [session]);
-
-    // Scroll live captions to bottom
-    useEffect(() => {
-        if (liveBoxRef.current) liveBoxRef.current.scrollTop = liveBoxRef.current.scrollHeight;
+        if (liveBoxRef.current) {
+            liveBoxRef.current.scrollTop = liveBoxRef.current.scrollHeight;
+        }
     }, [finalTranscript, interimTranscript]);
 
+    /* ── cleanup on unmount ───────────────────────────────── */
     useEffect(() => {
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
-            recognitionRef.current?.stop();
+            if (pollRef.current) clearInterval(pollRef.current);
+            if (visitIdRef.current) {
+                fetch("/api/record-visit", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "stop", visitId: visitIdRef.current }),
+                }).catch(() => { });
+            }
         };
     }, []);
 
-    const startRecording = () => {
+    /* ─────────────────────────────────────────────────────── handlers */
+
+    /**
+     * Starts an AssemblyAI streaming session via POST /api/record-visit { action: "start" }.
+     * Then polls GET /api/record-visit/transcript?visitId=... every 800 ms to get live turns.
+     */
+    const startRecording = async () => {
         setMicError("");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        if (!SR) {
-            setMicError("Your browser does not support the Web Speech API. Please use Chrome or Edge.");
-            return;
-        }
-        const recognition: SpeechRecognitionInstance = new SR();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = "en-IN";
-
-        recognition.onresult = (e: SpeechRecognitionEvent) => {
-            let interim = "";
-            let newFinal = "";
-            for (let i = e.resultIndex; i < e.results.length; i++) {
-                const text = e.results[i][0].transcript;
-                if (e.results[i].isFinal) newFinal += text + " ";
-                else interim += text;
-            }
-            if (newFinal) setFinalTranscript(prev => prev + newFinal);
-            setInterimTranscript(interim);
-        };
-
-        recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
-            if (e.error === "not-allowed" || e.error === "permission-denied") {
-                setMicError("Microphone access denied. Please allow microphone access and try again.");
-                stopRecording();
-            }
-        };
-
-        recognition.onend = () => {
-            // If still supposed to be recording, restart (handles browser auto-stop)
-            if (recognitionRef.current && isRecordingRef.current) {
-                try { recognition.start(); } catch { /* ignore */ }
-            }
-        };
-
-        recognitionRef.current = recognition;
-        recognition.start();
-        setIsRecording(true);
-        setElapsed(0);
+        setApiError("");
         setFinalTranscript("");
         setInterimTranscript("");
-        setPhase("recording");
-        timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
-    };
-
-    // Keep a ref for isRecording so the onend closure can read it
-    const isRecordingRef = useRef(false);
-    useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
-
-    const stopRecording = () => {
-        isRecordingRef.current = false;
-        if (timerRef.current) clearInterval(timerRef.current);
-        recognitionRef.current?.stop();
-        setIsRecording(false);
-        setInterimTranscript("");
-    };
-
-    const submitForSummary = async () => {
-        const fullTranscript = finalTranscript.trim();
-        if (!fullTranscript || fullTranscript.length < 10) {
-            setApiError("Not enough speech detected. Please record a longer visit.");
-            return;
-        }
-        setPhase("processing");
-        setApiError("");
-
-        const contextParts: string[] = [];
-        if (details.doctorName) contextParts.push(`Doctor: ${details.doctorName}`);
-        if (details.doctorSpecialty) contextParts.push(`Specialty: ${details.doctorSpecialty}`);
-        if (details.hospitalName) contextParts.push(`Hospital: ${details.hospitalName}`);
-        if (details.department) contextParts.push(`Department: ${details.department}`);
-        if (details.notes) contextParts.push(`Patient notes: ${details.notes}`);
+        visitIdRef.current = null;
 
         try {
-            setProcessingStep("Generating your personalised summary with Gemini…");
-            const res = await fetch("/api/transcribe", {
+            const res = await fetch("/api/record-visit", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ transcript: fullTranscript, context: contextParts.join("\n") || undefined }),
+                body: JSON.stringify({ action: "start" }),
             });
             const data = await res.json();
-            if (!res.ok) {
-                setApiError(data.error || "Summary generation failed. Please try again.");
-                setPhase("recording");
-                return;
-            }
-            setSummary(data.summary || "");
+            if (!res.ok) throw new Error(data.error || "Failed to start recording");
+
+            visitIdRef.current = data.visitId;
+
+            // Poll the live-transcript endpoint for real-time turns from AssemblyAI
+            pollRef.current = setInterval(async () => {
+                if (!isRecordingRef.current || !visitIdRef.current) return;
+                try {
+                    const pollRes = await fetch(
+                        `/api/record-visit/transcript?visitId=${visitIdRef.current}`
+                    );
+                    if (!pollRes.ok) return;
+                    const pollData = await pollRes.json();
+                    if (pollData.final !== undefined) setFinalTranscript(pollData.final);
+                    if (pollData.interim !== undefined) setInterimTranscript(pollData.interim);
+                } catch {
+                    // silently ignore transient poll errors
+                }
+            }, 800);
+
+            setPhase("recording");
+            setIsRecording(true);
+            isRecordingRef.current = true;
+            setElapsed(0);
+            timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+        } catch (err: unknown) {
+            setMicError(err instanceof Error ? err.message : "Could not start recording");
+        }
+    };
+
+    /**
+     * Stops recording: clears timers, calls POST /api/record-visit { action: "stop" }.
+     * The route returns the full joined transcript from AssemblyAI.
+     */
+    const stopRecording = async () => {
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        setIsRecording(false);
+        isRecordingRef.current = false;
+        setInterimTranscript("");
+
+        if (!visitIdRef.current) return;
+        try {
+            const res = await fetch("/api/record-visit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "stop", visitId: visitIdRef.current }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Failed to stop recording");
+            // Use the definitive transcript returned by the server
+            if (data.transcript) setFinalTranscript(data.transcript);
+        } catch (err: unknown) {
+            setApiError(err instanceof Error ? err.message : "Error stopping recording");
+        }
+    };
+
+    /**
+     * Resumes by opening a fresh AssemblyAI session and appending new turns
+     * to the existing finalTranscript.
+     */
+    const resumeRecording = async () => {
+        setApiError("");
+        try {
+            const res = await fetch("/api/record-visit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "start" }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Failed to resume");
+            visitIdRef.current = data.visitId;
+
+            pollRef.current = setInterval(async () => {
+                if (!isRecordingRef.current || !visitIdRef.current) return;
+                try {
+                    const pollRes = await fetch(
+                        `/api/record-visit/transcript?visitId=${visitIdRef.current}`
+                    );
+                    if (!pollRes.ok) return;
+                    const pollData = await pollRes.json();
+                    // Append new turns after the existing transcript
+                    if (pollData.final) {
+                        setFinalTranscript((prev) =>
+                            prev ? `${prev} ${pollData.final}` : pollData.final
+                        );
+                    }
+                    if (pollData.interim !== undefined) setInterimTranscript(pollData.interim);
+                } catch {
+                    // silently ignore
+                }
+            }, 800);
+
+            setIsRecording(true);
+            isRecordingRef.current = true;
+            timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+        } catch (err: unknown) {
+            setApiError(err instanceof Error ? err.message : "Failed to resume");
+        }
+    };
+
+    /**
+     * Sends the final transcript + visit details to POST /api/record-visit/analyse
+     * which calls Gemini 2.5 Flash and returns a markdown summary.
+     */
+    const submitForSummary = async () => {
+        if (!finalTranscript.trim()) return;
+        setPhase("processing");
+        setProcessingStep("Sending transcript to Gemini 2.5 Flash…");
+
+        try {
+            const res = await fetch("/api/record-visit/analyse", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ transcript: finalTranscript, details }),
+            });
+            setProcessingStep("Formatting visit summary…");
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Analysis failed");
+            setSummary(data.summary);
             setPhase("summary");
-        } catch {
-            setApiError("Network error. Please check your connection and try again.");
+        } catch (err: unknown) {
+            setApiError(err instanceof Error ? err.message : "Failed to generate summary");
             setPhase("recording");
         }
     };
 
     const downloadSummary = () => {
-        const content = [
-            "MedMap Companion Scribe — Visit Summary",
-            `Generated: ${new Date().toLocaleString("en-IN")}`,
-            details.doctorName ? `Doctor: Dr. ${details.doctorName}` : "",
-            details.hospitalName ? `Hospital: ${details.hospitalName}` : "",
-            "",
-            "═══════════════════════",
-            "SUMMARY",
-            "═══════════════════════",
-            summary.replace(/#{1,6} /g, "").replace(/\*\*/g, ""),
-            "",
-            "═══════════════════════",
-            "FULL TRANSCRIPT",
-            "═══════════════════════",
-            finalTranscript,
-        ].filter(Boolean).join("\n");
-        const blob = new Blob([content], { type: "text/plain" });
+        const blob = new Blob([summary], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `visit-summary-${new Date().toISOString().split("T")[0]}.txt`;
+        a.download = `visit-summary-${details.doctorName.replace(/\s+/g, "-") || "visit"}-${new Date().toISOString().slice(0, 10)}.txt`;
         a.click();
         URL.revokeObjectURL(url);
     };
 
     const reset = () => {
-        stopRecording();
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        // Best-effort stop any active session
+        if (visitIdRef.current) {
+            fetch("/api/record-visit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "stop", visitId: visitIdRef.current }),
+            }).catch(() => { });
+        }
+        visitIdRef.current = null;
         setPhase("consent");
-        setDetails({ ...EMPTY_DETAILS, patientName: session?.user?.name || "" });
+        setDetails(EMPTY_DETAILS);
         setConsentChecked(false);
+        setIsRecording(false);
+        isRecordingRef.current = false;
+        setElapsed(0);
         setFinalTranscript("");
         setInterimTranscript("");
         setSummary("");
-        setApiError("");
-        setElapsed(0);
         setMicError("");
+        setApiError("");
+        setTranscriptExpanded(false);
     };
+
+    /* ─────────────────────────────────────────────────────── render */
 
     if (isPending) return (
         <div className="min-h-screen flex items-center justify-center">
@@ -279,7 +321,7 @@ export default function RecordVisitPage() {
                         Record your doctor&apos;s visit to get a complete, understandable summary afterwards.
                     </p>
                     <div className="badge badge-ghost badge-sm mt-2 gap-1">
-                        <Captions className="w-3 h-3" /> Powered by Web Speech API + Gemini — 100% free
+                        <Captions className="w-3 h-3" /> Powered by AssemblyAI + Gemini — 100% free
                     </div>
                 </div>
 
@@ -358,7 +400,7 @@ export default function RecordVisitPage() {
                                     <ShieldCheck className="w-5 h-5 text-success shrink-0 mt-0.5" />
                                     <p className="text-sm text-base-content/80">
                                         By pressing the button below, you confirm that <strong>both the healthcare provider and the patient</strong> have agreed to record this visit.
-                                        Speech is transcribed locally in your browser and is never uploaded to any server.
+                                        Audio is streamed to AssemblyAI for transcription and is never stored permanently.
                                     </p>
                                 </div>
                                 <a href="/privacy-policy" className="link link-primary text-sm ml-8">Privacy Policy →</a>
@@ -422,7 +464,7 @@ export default function RecordVisitPage() {
                                 </div>
                                 <div ref={liveBoxRef} className="bg-base-200 rounded-xl p-3 h-36 overflow-y-auto text-sm leading-relaxed">
                                     {finalTranscript && <span>{finalTranscript}</span>}
-                                    {interimTranscript && <span className="text-base-content/40 italic">{interimTranscript}</span>}
+                                    {interimTranscript && <span className="text-base-content/40 italic"> {interimTranscript}</span>}
                                     {!finalTranscript && !interimTranscript && (
                                         <span className="text-base-content/30 italic">Start speaking — captions will appear here…</span>
                                     )}
@@ -446,7 +488,7 @@ export default function RecordVisitPage() {
                                         <button className="btn btn-primary btn-lg gap-2" onClick={submitForSummary} disabled={!finalTranscript.trim()}>
                                             <FileText className="w-5 h-5" /> Generate Summary
                                         </button>
-                                        <button className="btn btn-outline gap-2" onClick={() => { setIsRecording(true); isRecordingRef.current = true; recognitionRef.current?.start(); timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000); }}>
+                                        <button className="btn btn-outline gap-2" onClick={resumeRecording}>
                                             <Mic className="w-4 h-4" /> Resume
                                         </button>
                                     </>
@@ -535,4 +577,3 @@ export default function RecordVisitPage() {
         </div>
     );
 }
-

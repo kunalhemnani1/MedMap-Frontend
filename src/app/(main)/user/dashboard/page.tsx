@@ -138,12 +138,7 @@ export default function DashboardPage() {
     if (!session?.user) return null;
 
     const user = session.user;
-    const initials = (user.name || "U")
-        .split(" ")
-        .map((w: string) => w[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2);
+    const avatarLetter = (user.name?.trim()?.[0] || "U").toUpperCase();
 
     const upcomingAppointments = appointments.filter((a) => a.status === "confirmed" || a.status === "pending");
 
@@ -196,13 +191,13 @@ export default function DashboardPage() {
                                 <div className="flex items-center gap-4 mb-6">
                                     <div className="avatar placeholder">
                                         <div className="bg-primary text-primary-content rounded-full w-16">
-                                            <span className="text-xl">{initials}</span>
+                                            <span className="text-xl">{avatarLetter}</span>
                                         </div>
                                     </div>
                                     <div>
                                         <h2 className="font-semibold text-lg">{user.name}</h2>
                                         <p className="text-sm text-base-content/60">{user.email}</p>
-                                        <span className="badge badge-primary badge-sm mt-1 capitalize">
+                                        <span className="badge badge-primary mt-2 px-3 py-1 capitalize">
                                             {(user as any).role || "user"}
                                         </span>
                                     </div>
@@ -239,7 +234,7 @@ export default function DashboardPage() {
                     <div className="lg:col-span-3 space-y-6">
                         {activeTab === "overview" && (
                             <>
-                                <div className="card bg-linear-to-r from-primary to-secondary text-primary-content">
+                                <div className="card bg-linear-to-r from-primary to-secondary text-white">
                                     <div className="card-body">
                                         <h2 className="card-title text-2xl">Welcome back, {user.name?.split(" ")[0]}!</h2>
                                         <p className="opacity-80">

@@ -125,7 +125,7 @@ export default function DoctorDashboard() {
     if (!session?.user) return null;
 
     const user = session.user;
-    const initials = (user.name || "D").split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2);
+    const avatarLetter = (user.name?.trim()?.[0] || "D").toUpperCase();
     const todayStr = new Date().toISOString().split("T")[0];
     const todayAppts = appointments.filter(a => new Date(a.appointmentDate).toISOString().split("T")[0] === todayStr);
     const pendingAppts = appointments.filter(a => a.status === "confirmed" || a.status === "pending");
@@ -142,13 +142,13 @@ export default function DoctorDashboard() {
                                 <div className="flex items-center gap-4 mb-6">
                                     <div className="avatar placeholder">
                                         <div className="bg-secondary text-secondary-content rounded-full w-16">
-                                            <span className="text-xl">{initials}</span>
+                                            <span className="text-xl">{avatarLetter}</span>
                                         </div>
                                     </div>
                                     <div>
                                         <h2 className="font-semibold text-lg">{user.name}</h2>
                                         <p className="text-sm text-base-content/60">{user.email}</p>
-                                        <span className="badge badge-secondary badge-sm mt-1">Doctor</span>
+                                        <span className="badge badge-secondary mt-2 px-3 py-1">Doctor</span>
                                     </div>
                                 </div>
                                 <ul className="menu p-0 gap-1">
