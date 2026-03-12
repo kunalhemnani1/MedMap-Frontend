@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
     Shield,
     Search,
@@ -15,102 +15,85 @@ import {
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
-interface InsuranceResult {
-    hospital: string;
-    covered: boolean;
-    networkType: "in-network" | "out-of-network" | "partial";
-    copay: number;
+interface InsurancePlan {
+    id: string;
+    provider: string;
+    plan_name: string;
+    plan_type: string;
+    sum_insured: number;
+    annual_premium: number;
+    co_payment: number;
     deductible: number;
-    estimatedCoverage: number;
-    notes: string;
+    maternity_covered: boolean;
+    [key: string]: unknown;
 }
 
-const insuranceProviders = [
-    "Star Health Insurance",
-    "HDFC ERGO Health",
-    "ICICI Lombard Health",
-    "Max Bupa Health",
-    "Bajaj Allianz Health",
-    "New India Assurance",
-    "United India Insurance",
-    "National Insurance",
-    "Care Health Insurance",
-    "Niva Bupa Health",
-];
+interface MatchingPlan {
+    id: string;
+    provider: string;
+    plan_name: string;
+    sum_insured: number;
+    annual_premium: number;
+    co_payment: number;
+    out_of_pocket: number;
+    claim_settlement_ratio: number;
+}
 
-const mockResults: InsuranceResult[] = [
-    {
-        hospital: "Apollo Hospital, Indore",
-        covered: true,
-        networkType: "in-network",
-        copay: 500,
-        deductible: 2000,
-        estimatedCoverage: 85,
-        notes: "Full coverage for most procedures. Pre-authorization required for surgeries.",
-    },
-    {
-        hospital: "Medanta Hospital, Indore",
-        covered: true,
-        networkType: "in-network",
-        copay: 750,
-        deductible: 2500,
-        estimatedCoverage: 80,
-        notes: "Covered under premium network. Some specialty treatments may have limits.",
-    },
-    {
-        hospital: "Bombay Hospital, Indore",
-        covered: true,
-        networkType: "partial",
-        copay: 1000,
-        deductible: 3000,
-        estimatedCoverage: 60,
-        notes: "Partial coverage. Outpatient services may not be covered.",
-    },
-    {
-        hospital: "CHL Hospital, Indore",
-        covered: false,
-        networkType: "out-of-network",
-        copay: 0,
-        deductible: 0,
-        estimatedCoverage: 0,
-        notes: "Not in network. You may need to pay full amount and claim reimbursement.",
-    },
-];
+interface CoverageResult {
+    procedure: string;
+    estimated_cost: number;
+    price_range: { min: number; max: number };
+    matching_plans: MatchingPlan[];
+}
 
 export default function InsuranceCheckerPage() {
-    const [provider, setProvider] = useState("");
-    const [policyNumber, setPolicyNumber] = useState("");
     const [procedure, setProcedure] = useState("");
+    const [planType, setPlanType] = useState("");
+    const [maxPremium, setMaxPremium] = useState("");
     const [isLoading, setIsLoading] = useState(false);
-    const [results, setResults] = useState<InsuranceResult[] | null>(null);
+    const [results, setResults] = useState<CoverageResult | null>(null);
+    const [plans, setPlans] = useState<InsurancePlan[]>([]);
     const [error, setError] = useState<string | null>(null);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    // Load available plan types
+    const planTypes = ["Individual", "Family", "Senior Citizen", "Group", "Top-Up"];
+
+    const handleCheck = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsLoading(true);
-        setError(null);
-
-        // Simulate API call
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-
-        if (!provider) {
-            setError("Please select an insurance provider");
-            setIsLoading(false);
+        if (!procedure.trim()) {
+            setError("Please enter a procedure name");
             return;
         }
-
-        setResults(mockResults);
-        setIsLoading(false);
+        setIsLoading(true);
+        setError(null);
+        try {
+            const params = new URLSearchParams({ procedure: procedure.trim() });
+            const res = await fetch(`/api/insurance/check?${params}`);
+            if (!res.ok) throw new Error("Failed");
+            const json = await res.json();
+            setResults(json);
+        } catch {
+            setError("Could not check coverage. Try a different procedure.");
+            setResults(null);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
-    const getNetworkBadge = (type: InsuranceResult["networkType"]) => {
-        switch (type) {
-            case "in-network":
-                return <span className="badge badge-success gap-1"><CheckCircle className="w-3 h-3" /> In-Network</span>;
-            case "out-of-network":
-                return <span className="badge badge-error gap-1"><XCircle className="w-3 h-3" /> Out-of-Network</span>;
-            case "partial":
-                return <span className="badge badge-warning gap-1"><AlertCircle className="w-3 h-3" /> Partial</span>;
+    const handleBrowsePlans = async () => {
+        setIsLoading(true);
+        try {
+            const params = new URLSearchParams();
+            if (planType) params.set("type", planType);
+            if (maxPremium) params.set("max_premium", maxPremium);
+            const res = await fetch(`/api/insurance/plans?${params}`);
+            if (!res.ok) throw new Error("Failed");
+            const json = await res.json();
+            setPlans(json.results || []);
+        } catch {
+            setPlans([]);
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -124,14 +107,14 @@ export default function InsuranceCheckerPage() {
                     <div className="max-w-3xl mx-auto text-center">
                         <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full mb-6">
                             <Shield className="w-5 h-5" />
-                            <span className="font-medium">Insurance Verification</span>
+                            <span className="font-medium">Insurance Coverage Checker</span>
                         </div>
                         <h1 className="text-4xl md:text-5xl font-bold mb-4">
                             Check Your Insurance Coverage
                         </h1>
                         <p className="text-lg text-base-content/70">
-                            Verify which hospitals accept your insurance and understand your coverage
-                            before you visit. No surprises, just transparency.
+                            Verify which insurance plans cover your procedure and understand
+                            estimated out-of-pocket costs.
                         </p>
                     </div>
                 </div>
@@ -145,49 +128,13 @@ export default function InsuranceCheckerPage() {
                             <div className="card-body">
                                 <h2 className="card-title mb-4">
                                     <FileText className="w-5 h-5 text-primary" />
-                                    Your Insurance Details
+                                    Coverage Check
                                 </h2>
 
-                                <form onSubmit={handleSubmit} className="space-y-4">
+                                <form onSubmit={handleCheck} className="space-y-4">
                                     <div className="form-control">
                                         <label className="label">
-                                            <span className="label-text font-medium">Insurance Provider</span>
-                                        </label>
-                                        <select
-                                            className="select select-bordered w-full"
-                                            value={provider}
-                                            onChange={(e) => setProvider(e.target.value)}
-                                        >
-                                            <option value="">Select provider...</option>
-                                            {insuranceProviders.map((p) => (
-                                                <option key={p} value={p}>
-                                                    {p}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    <div className="form-control">
-                                        <label className="label">
-                                            <span className="label-text font-medium">Policy Number</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            placeholder="e.g., POL123456789"
-                                            className="input input-bordered w-full"
-                                            value={policyNumber}
-                                            onChange={(e) => setPolicyNumber(e.target.value)}
-                                        />
-                                        <label className="label">
-                                            <span className="label-text-alt text-base-content/60">
-                                                Optional - for more accurate results
-                                            </span>
-                                        </label>
-                                    </div>
-
-                                    <div className="form-control">
-                                        <label className="label">
-                                            <span className="label-text font-medium">Procedure (Optional)</span>
+                                            <span className="label-text font-medium">Procedure Name</span>
                                         </label>
                                         <input
                                             type="text"
@@ -195,6 +142,35 @@ export default function InsuranceCheckerPage() {
                                             className="input input-bordered w-full"
                                             value={procedure}
                                             onChange={(e) => setProcedure(e.target.value)}
+                                        />
+                                    </div>
+
+                                    <div className="form-control">
+                                        <label className="label">
+                                            <span className="label-text font-medium">Plan Type (Optional)</span>
+                                        </label>
+                                        <select
+                                            className="select select-bordered w-full"
+                                            value={planType}
+                                            onChange={(e) => setPlanType(e.target.value)}
+                                        >
+                                            <option value="">All types</option>
+                                            {planTypes.map((t) => (
+                                                <option key={t} value={t}>{t}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="form-control">
+                                        <label className="label">
+                                            <span className="label-text font-medium">Max Annual Premium</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            placeholder="e.g., 50000"
+                                            className="input input-bordered w-full"
+                                            value={maxPremium}
+                                            onChange={(e) => setMaxPremium(e.target.value)}
                                         />
                                     </div>
 
@@ -213,7 +189,7 @@ export default function InsuranceCheckerPage() {
                                         {isLoading ? (
                                             <>
                                                 <Loader2 className="w-5 h-5 animate-spin" />
-                                                Checking Coverage...
+                                                Checking...
                                             </>
                                         ) : (
                                             <>
@@ -224,26 +200,30 @@ export default function InsuranceCheckerPage() {
                                     </button>
                                 </form>
 
-                                <div className="divider">Need Help?</div>
+                                <div className="divider">Or</div>
 
-                                <a href="tel:1800-123-4567" className="btn btn-outline btn-sm gap-2">
-                                    <Phone className="w-4 h-4" />
-                                    Call Support
-                                </a>
+                                <button
+                                    onClick={handleBrowsePlans}
+                                    className="btn btn-outline btn-sm gap-2"
+                                    disabled={isLoading}
+                                >
+                                    <Shield className="w-4 h-4" />
+                                    Browse Insurance Plans
+                                </button>
                             </div>
                         </div>
                     </div>
 
                     {/* Results Section */}
                     <div className="lg:col-span-2">
-                        {!results && !isLoading && (
+                        {!results && plans.length === 0 && !isLoading && (
                             <div className="card bg-base-100 shadow-lg">
                                 <div className="card-body items-center text-center py-16">
                                     <Shield className="w-16 h-16 text-base-content/20 mb-4" />
-                                    <h3 className="text-xl font-semibold">Enter Your Insurance Details</h3>
+                                    <h3 className="text-xl font-semibold">Enter a Procedure Name</h3>
                                     <p className="text-base-content/60 max-w-md">
-                                        Fill out the form to see which hospitals in your area accept your
-                                        insurance and what your estimated coverage will be.
+                                        Enter a procedure to see which insurance plans cover it, along
+                                        with estimated out-of-pocket costs.
                                     </p>
                                 </div>
                             </div>
@@ -254,92 +234,134 @@ export default function InsuranceCheckerPage() {
                                 <div className="card-body items-center text-center py-16">
                                     <Loader2 className="w-16 h-16 text-primary animate-spin mb-4" />
                                     <h3 className="text-xl font-semibold">Checking Coverage...</h3>
-                                    <p className="text-base-content/60">
-                                        Verifying your insurance with network hospitals
-                                    </p>
                                 </div>
                             </div>
                         )}
 
-                        {results && (
+                        {results && !isLoading && (
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
                                     <h2 className="text-xl font-semibold">
-                                        Coverage Results for {provider}
+                                        Coverage for &ldquo;{results.procedure}&rdquo;
                                     </h2>
-                                    <span className="badge badge-lg">{results.length} hospitals found</span>
+                                    <span className="badge badge-lg">
+                                        Avg cost: ₹{Math.round(results.estimated_cost).toLocaleString("en-IN")}
+                                    </span>
                                 </div>
 
-                                {results.map((result, index) => (
-                                    <div
-                                        key={index}
-                                        className={`card bg-base-100 shadow-lg border-l-4 ${result.covered
-                                            ? result.networkType === "in-network"
-                                                ? "border-success"
-                                                : "border-warning"
-                                            : "border-error"
-                                            }`}
-                                    >
-                                        <div className="card-body">
-                                            <div className="flex flex-wrap items-start justify-between gap-4">
-                                                <div>
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <Building2 className="w-5 h-5 text-primary" />
-                                                        <h3 className="font-semibold text-lg">{result.hospital}</h3>
-                                                    </div>
-                                                    {getNetworkBadge(result.networkType)}
-                                                </div>
-
-                                                {result.covered && (
-                                                    <div className="text-right">
-                                                        <div className="text-3xl font-bold text-primary">
-                                                            {result.estimatedCoverage}%
-                                                        </div>
-                                                        <div className="text-sm text-base-content/60">
-                                                            Estimated Coverage
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {result.covered && (
-                                                <div className="grid sm:grid-cols-2 gap-4 mt-4">
-                                                    <div className="bg-base-200 rounded-lg p-3">
-                                                        <div className="text-sm text-base-content/60">Copay</div>
-                                                        <div className="font-semibold">₹{result.copay.toLocaleString()}</div>
-                                                    </div>
-                                                    <div className="bg-base-200 rounded-lg p-3">
-                                                        <div className="text-sm text-base-content/60">Deductible</div>
-                                                        <div className="font-semibold">₹{result.deductible.toLocaleString()}</div>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            <p className="text-base-content/70 mt-2">{result.notes}</p>
-
-                                            <div className="card-actions justify-end mt-4">
-                                                <a
-                                                    href={`/hospital/${result.hospital.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-                                                    className="btn btn-primary btn-sm gap-1"
-                                                >
-                                                    View Hospital
-                                                    <ArrowRight className="w-4 h-4" />
-                                                </a>
-                                            </div>
+                                {results.matching_plans.length === 0 ? (
+                                    <div className="card bg-base-100 shadow-lg">
+                                        <div className="card-body text-center py-8">
+                                            <XCircle className="w-12 h-12 text-error mx-auto mb-2" />
+                                            <p className="text-base-content/60">No matching plans found for this procedure.</p>
                                         </div>
                                     </div>
-                                ))}
+                                ) : (
+                                    results.matching_plans.map((mp, index) => {
+                                        const coveragePct = mp.co_payment > 0 ? 100 - mp.co_payment : 100;
+                                        return (
+                                            <div
+                                                key={index}
+                                                className={`card bg-base-100 shadow-lg border-l-4 ${coveragePct >= 80
+                                                        ? "border-success"
+                                                        : coveragePct >= 50
+                                                            ? "border-warning"
+                                                            : "border-error"
+                                                    }`}
+                                            >
+                                                <div className="card-body">
+                                                    <div className="flex flex-wrap items-start justify-between gap-4">
+                                                        <div>
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <Shield className="w-5 h-5 text-primary" />
+                                                                <h3 className="font-semibold text-lg">{mp.plan_name}</h3>
+                                                            </div>
+                                                            <p className="text-sm text-base-content/60">{mp.provider}</p>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="text-3xl font-bold text-primary">
+                                                                {coveragePct}%
+                                                            </div>
+                                                            <div className="text-sm text-base-content/60">Coverage</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="grid sm:grid-cols-3 gap-4 mt-4">
+                                                        <div className="bg-base-200 rounded-lg p-3">
+                                                            <div className="text-sm text-base-content/60">Out-of-Pocket</div>
+                                                            <div className="font-semibold">₹{Math.round(mp.out_of_pocket).toLocaleString("en-IN")}</div>
+                                                        </div>
+                                                        <div className="bg-base-200 rounded-lg p-3">
+                                                            <div className="text-sm text-base-content/60">Annual Premium</div>
+                                                            <div className="font-semibold">₹{mp.annual_premium.toLocaleString("en-IN")}</div>
+                                                        </div>
+                                                        <div className="bg-base-200 rounded-lg p-3">
+                                                            <div className="text-sm text-base-content/60">Sum Insured</div>
+                                                            <div className="font-semibold">₹{mp.sum_insured.toLocaleString("en-IN")}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
 
                                 <div className="alert alert-info">
                                     <AlertCircle className="w-5 h-5" />
                                     <div>
                                         <h4 className="font-semibold">Disclaimer</h4>
                                         <p className="text-sm">
-                                            Coverage estimates are approximate and subject to your specific policy terms.
-                                            Please contact your insurance provider for exact coverage details.
+                                            Coverage estimates are approximate. Please contact your insurance
+                                            provider for exact coverage details.
                                         </p>
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* Browse Plans Results */}
+                        {plans.length > 0 && !results && !isLoading && (
+                            <div className="space-y-4">
+                                <h2 className="text-xl font-semibold">{plans.length} Insurance Plans</h2>
+                                {plans.map((plan, i) => (
+                                    <div key={i} className="card bg-base-100 shadow-lg">
+                                        <div className="card-body">
+                                            <div className="flex items-start justify-between">
+                                                <div>
+                                                    <h3 className="font-semibold text-lg">{plan.plan_name}</h3>
+                                                    <p className="text-sm text-base-content/60">{plan.provider}</p>
+                                                    <span className="badge badge-outline badge-sm mt-1">{plan.plan_type}</span>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-xl font-bold text-primary">
+                                                        ₹{plan.annual_premium.toLocaleString("en-IN")}
+                                                    </div>
+                                                    <div className="text-xs text-base-content/60">per year</div>
+                                                </div>
+                                            </div>
+                                            <div className="grid sm:grid-cols-3 gap-3 mt-3">
+                                                <div className="bg-base-200 rounded-lg p-2 text-center">
+                                                    <div className="text-xs text-base-content/60">Sum Insured</div>
+                                                    <div className="font-semibold text-sm">₹{plan.sum_insured.toLocaleString("en-IN")}</div>
+                                                </div>
+                                                <div className="bg-base-200 rounded-lg p-2 text-center">
+                                                    <div className="text-xs text-base-content/60">Copay</div>
+                                                    <div className="font-semibold text-sm">{plan.co_payment}%</div>
+                                                </div>
+                                                <div className="bg-base-200 rounded-lg p-2 text-center">
+                                                    <div className="text-xs text-base-content/60">Maternity</div>
+                                                    <div className="font-semibold text-sm">
+                                                        {plan.maternity_covered ? (
+                                                            <span className="text-success flex items-center justify-center gap-1"><CheckCircle className="w-3 h-3" /> Yes</span>
+                                                        ) : (
+                                                            <span className="text-base-content/40">No</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         )}
                     </div>

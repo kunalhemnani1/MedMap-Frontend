@@ -1,8 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  output: "standalone",
   reactCompiler: true,
+  serverExternalPackages: ["node-record-lpcm16"],
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "images.unsplash.com" },
+    ],
+  },
+  // Turbopack is the default in Next.js 16; empty config tells it we're intentional
+  turbopack: {},
   eslint: {
     ignoreDuringBuilds: true,
   },

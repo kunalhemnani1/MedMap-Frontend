@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
+import { saveNearby, getNearby, getNearbyStale } from "@/lib/offlineDB";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import {
+    type NearbyFacility,
+    fetchNearbyFromOSM,
+} from "@/lib/nearbyFacilities";
 import {
     MapPin,
     Navigation,
@@ -8,7 +15,7 @@ import {
     AlertCircle,
     Phone,
     Clock,
-    Star,
+    RefreshCw,
     ArrowRight,
     Filter,
     List,
@@ -18,103 +25,14 @@ import {
     Pill,
     FlaskConical,
     Ambulance,
+    WifiOff,
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
-interface NearbyHospital {
-    id: string;
-    name: string;
-    address: string;
-    distance: number;
-    rating: number;
-    reviewCount: number;
-    type: "hospital" | "clinic" | "pharmacy" | "lab" | "emergency";
-    isOpen: boolean;
-    openUntil: string;
-    phone: string;
-    specialties: string[];
-}
+const NearMeMap = dynamic(() => import("./NearMeMap"), { ssr: false });
 
-const mockHospitals: NearbyHospital[] = [
-    {
-        id: "1",
-        name: "Apollo Hospital",
-        address: "Scheme No. 54, Vijay Nagar, Indore",
-        distance: 1.2,
-        rating: 4.8,
-        reviewCount: 2340,
-        type: "hospital",
-        isOpen: true,
-        openUntil: "24 hours",
-        phone: "+91 731 2555555",
-        specialties: ["Cardiology", "Orthopedics", "Neurology"],
-    },
-    {
-        id: "2",
-        name: "Medanta Hospital",
-        address: "AB Road, Near Bombay Hospital, Indore",
-        distance: 2.5,
-        rating: 4.6,
-        reviewCount: 1890,
-        type: "hospital",
-        isOpen: true,
-        openUntil: "24 hours",
-        phone: "+91 731 2666666",
-        specialties: ["Oncology", "Cardiac Surgery", "Nephrology"],
-    },
-    {
-        id: "3",
-        name: "City Care Clinic",
-        address: "MG Road, Opposite City Center Mall, Indore",
-        distance: 0.8,
-        rating: 4.3,
-        reviewCount: 456,
-        type: "clinic",
-        isOpen: true,
-        openUntil: "9:00 PM",
-        phone: "+91 731 2444444",
-        specialties: ["General Medicine", "Pediatrics"],
-    },
-    {
-        id: "4",
-        name: "LifeCare Pharmacy",
-        address: "Palasia Square, Near HDFC Bank, Indore",
-        distance: 0.3,
-        rating: 4.5,
-        reviewCount: 234,
-        type: "pharmacy",
-        isOpen: true,
-        openUntil: "10:00 PM",
-        phone: "+91 731 2333333",
-        specialties: [],
-    },
-    {
-        id: "5",
-        name: "Dr. Lal PathLabs",
-        address: "Race Course Road, Indore",
-        distance: 1.8,
-        rating: 4.4,
-        reviewCount: 890,
-        type: "lab",
-        isOpen: false,
-        openUntil: "Opens 7:00 AM",
-        phone: "+91 731 2777777",
-        specialties: ["Blood Tests", "Imaging"],
-    },
-    {
-        id: "6",
-        name: "108 Emergency Services",
-        address: "Government Hospital Campus, Indore",
-        distance: 3.2,
-        rating: 4.1,
-        reviewCount: 567,
-        type: "emergency",
-        isOpen: true,
-        openUntil: "24 hours",
-        phone: "108",
-        specialties: ["Emergency", "Trauma"],
-    },
-];
+// NearbyHospital is an alias for the shared type
+type NearbyHospital = NearbyFacility;
 
 const facilityTypes = [
     { id: "all", label: "All", icon: Building2 },
@@ -129,10 +47,100 @@ export default function NearMePage() {
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [locationError, setLocationError] = useState<string | null>(null);
     const [isLoadingLocation, setIsLoadingLocation] = useState(false);
-    const [hospitals, setHospitals] = useState<NearbyHospital[]>([]);
+    const [hospitals, setHospitals] = useState<NearbyFacility[]>([]);
+    const [isFetching, setIsFetching] = useState(false);
+    const [fetchError, setFetchError] = useState<string | null>(null);
     const [selectedType, setSelectedType] = useState("all");
     const [viewMode, setViewMode] = useState<"list" | "map">("list");
     const [maxDistance, setMaxDistance] = useState(10);
+    const [cachedAt, setCachedAt] = useState<number | null>(null);
+    const isOnline = useOnlineStatus();
+    const prevOnlineRef = useRef(true);
+
+    const fetchHospitals = useCallback(
+        async (lat: number, lng: number) => {
+            setIsFetching(true);
+            setFetchError(null);
+            setCachedAt(null);
+
+            // Offline or network unavailable: serve from IndexedDB immediately
+            if (!navigator.onLine) {
+                const cached = await getNearby<NearbyFacility>(lat, lng, selectedType, maxDistance)
+                    ?? await getNearbyStale<NearbyFacility>(lat, lng, selectedType, maxDistance);
+                if (cached) {
+                    setHospitals(cached.hospitals);
+                    setCachedAt(cached.savedAt);
+                } else {
+                    setHospitals([]);
+                    setFetchError("You're offline and no cached data is available for this area yet. Connect to the internet once to enable offline support.");
+                }
+                setIsFetching(false);
+                return;
+            }
+
+            try {
+                const results = await fetchNearbyFromOSM(lat, lng, maxDistance, selectedType);
+                setHospitals(results);
+                saveNearby(lat, lng, selectedType, maxDistance, results);
+            } catch {
+                // Network failed mid-request — fall back to IndexedDB
+                const stale = await getNearbyStale<NearbyFacility>(lat, lng, selectedType, maxDistance);
+                if (stale) {
+                    setHospitals(stale.hospitals);
+                    setCachedAt(stale.savedAt);
+                } else {
+                    setFetchError("Failed to load nearby facilities. Please try again.");
+                }
+            } finally {
+                setIsFetching(false);
+            }
+        },
+        [maxDistance, selectedType]
+    );
+
+    // On mount: restore last known location from localStorage, then either
+    // serve cache (offline) or kick off a fresh fetch (online).
+    useEffect(() => {
+        const stored = localStorage.getItem("medmap-last-location");
+        if (stored) {
+            try {
+                const { lat, lng } = JSON.parse(stored) as { lat: number; lng: number };
+                setLocation({ lat, lng });
+                return; // fetchHospitals triggered by the location effect below
+            } catch {
+                localStorage.removeItem("medmap-last-location");
+            }
+        }
+
+        // No stored location — silently try to get it if permission is already granted
+        if (!navigator.permissions || !navigator.geolocation) return;
+        navigator.permissions.query({ name: "geolocation" }).then((status) => {
+            if (status.state !== "granted") return;
+            setIsLoadingLocation(true);
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    localStorage.setItem("medmap-last-location", JSON.stringify(coords));
+                    setLocation(coords);
+                    setIsLoadingLocation(false);
+                },
+                () => setIsLoadingLocation(false),
+                { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
+            );
+        });
+    }, []);
+
+    useEffect(() => {
+        if (location) fetchHospitals(location.lat, location.lng);
+    }, [location, fetchHospitals]);
+
+    // Auto-refetch when connection is restored while showing cached data
+    useEffect(() => {
+        if (isOnline && !prevOnlineRef.current && location && cachedAt !== null) {
+            fetchHospitals(location.lat, location.lng);
+        }
+        prevOnlineRef.current = isOnline;
+    }, [isOnline, location, cachedAt, fetchHospitals]);
 
     const requestLocation = () => {
         setIsLoadingLocation(true);
@@ -146,11 +154,12 @@ export default function NearMePage() {
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                setLocation({
+                const coords = {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude,
-                });
-                setHospitals(mockHospitals);
+                };
+                localStorage.setItem("medmap-last-location", JSON.stringify(coords));
+                setLocation(coords);
                 setIsLoadingLocation(false);
             },
             (error) => {
@@ -169,38 +178,23 @@ export default function NearMePage() {
         );
     };
 
-    const filteredHospitals = hospitals
-        .filter((h) => selectedType === "all" || h.type === selectedType)
-        .filter((h) => h.distance <= maxDistance)
-        .sort((a, b) => a.distance - b.distance);
-
     const getTypeIcon = (type: NearbyHospital["type"]) => {
         switch (type) {
-            case "hospital":
-                return <Building2 className="w-5 h-5" />;
-            case "clinic":
-                return <Stethoscope className="w-5 h-5" />;
-            case "pharmacy":
-                return <Pill className="w-5 h-5" />;
-            case "lab":
-                return <FlaskConical className="w-5 h-5" />;
-            case "emergency":
-                return <Ambulance className="w-5 h-5" />;
+            case "hospital": return <Building2 className="w-5 h-5" />;
+            case "clinic": return <Stethoscope className="w-5 h-5" />;
+            case "pharmacy": return <Pill className="w-5 h-5" />;
+            case "lab": return <FlaskConical className="w-5 h-5" />;
+            case "emergency": return <Ambulance className="w-5 h-5" />;
         }
     };
 
     const getTypeBadgeColor = (type: NearbyHospital["type"]) => {
         switch (type) {
-            case "hospital":
-                return "badge-primary";
-            case "clinic":
-                return "badge-secondary";
-            case "pharmacy":
-                return "badge-accent";
-            case "lab":
-                return "badge-info";
-            case "emergency":
-                return "badge-error";
+            case "hospital": return "badge-primary";
+            case "clinic": return "badge-secondary";
+            case "pharmacy": return "badge-accent";
+            case "lab": return "badge-info";
+            case "emergency": return "badge-error";
         }
     };
 
@@ -318,22 +312,51 @@ export default function NearMePage() {
                         </div>
                     </div>
 
+                    {/* Fetch error */}
+                    {fetchError && (
+                        <div className="alert alert-error mb-4">
+                            <AlertCircle className="w-5 h-5" />
+                            <span>{fetchError}</span>
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => fetchHospitals(location.lat, location.lng)}
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                                Retry
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Loading state */}
+                    {isFetching && (
+                        <div className="flex items-center gap-3 mb-4 text-base-content/60">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            <span>Searching for nearby facilities via OpenStreetMap…</span>
+                        </div>
+                    )}
+
                     <div className="grid lg:grid-cols-3 gap-6">
                         {/* Results List */}
                         <div className={viewMode === "map" ? "lg:col-span-1" : "lg:col-span-3"}>
                             <div className="flex items-center justify-between mb-4">
                                 <h2 className="text-xl font-semibold">
-                                    {filteredHospitals.length} Places Found
+                                    {hospitals.length} Places Found
                                 </h2>
+                                {cachedAt !== null && (
+                                    <span className="badge badge-warning gap-1 text-xs">
+                                        <WifiOff className="w-3 h-3" />
+                                        Cached &middot; {cachedAt ? new Date(cachedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                                    </span>
+                                )}
                             </div>
 
                             <div className={`space-y-4 ${viewMode === "list" ? "grid md:grid-cols-2 xl:grid-cols-3 gap-4 space-y-0" : ""}`}>
-                                {filteredHospitals.map((hospital) => (
+                                {hospitals.map((hospital) => (
                                     <div key={hospital.id} className="card bg-base-100 shadow-lg">
                                         <div className="card-body">
                                             <div className="flex items-start justify-between gap-2">
                                                 <div className="flex items-center gap-3">
-                                                    <div className={`p-2 rounded-lg bg-base-200`}>
+                                                    <div className="p-2 rounded-lg bg-base-200">
                                                         {getTypeIcon(hospital.type)}
                                                     </div>
                                                     <div>
@@ -351,49 +374,33 @@ export default function NearMePage() {
                                                 </div>
                                             </div>
 
-                                            <p className="text-sm text-base-content/70 mt-2">
-                                                {hospital.address}
-                                            </p>
-
-                                            <div className="flex items-center gap-4 mt-3 text-sm">
-                                                <div className="flex items-center gap-1">
-                                                    <Star className="w-4 h-4 text-warning fill-warning" />
-                                                    <span className="font-medium">{hospital.rating}</span>
-                                                    <span className="text-base-content/60">
-                                                        ({hospital.reviewCount})
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-1">
-                                                    <Clock className="w-4 h-4" />
-                                                    <span className={hospital.isOpen ? "text-success" : "text-error"}>
-                                                        {hospital.isOpen ? "Open" : "Closed"}
-                                                    </span>
-                                                    <span className="text-base-content/60">
-                                                        · {hospital.openUntil}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {hospital.specialties.length > 0 && (
-                                                <div className="flex flex-wrap gap-1 mt-2">
-                                                    {hospital.specialties.slice(0, 3).map((spec) => (
-                                                        <span key={spec} className="badge badge-outline badge-sm">
-                                                            {spec}
-                                                        </span>
-                                                    ))}
-                                                </div>
+                                            {hospital.address && (
+                                                <p className="text-sm text-base-content/70 mt-2">
+                                                    {hospital.address}
+                                                </p>
                                             )}
 
+                                            <div className="flex items-center gap-2 mt-3 text-sm">
+                                                <Clock className="w-4 h-4 text-base-content/50 shrink-0" />
+                                                <span className="text-base-content/70 text-xs">
+                                                    {hospital.openingHours}
+                                                </span>
+                                            </div>
+
                                             <div className="card-actions justify-between mt-4 pt-3 border-t border-base-200">
+                                                {hospital.phone ? (
+                                                    <a
+                                                        href={`tel:${hospital.phone}`}
+                                                        className="btn btn-ghost btn-sm gap-1"
+                                                    >
+                                                        <Phone className="w-4 h-4" />
+                                                        Call
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-xs text-base-content/40">No phone listed</span>
+                                                )}
                                                 <a
-                                                    href={`tel:${hospital.phone}`}
-                                                    className="btn btn-ghost btn-sm gap-1"
-                                                >
-                                                    <Phone className="w-4 h-4" />
-                                                    Call
-                                                </a>
-                                                <a
-                                                    href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(hospital.address)}`}
+                                                    href={`https://www.google.com/maps/dir/?api=1&destination=${hospital.lat},${hospital.lon}`}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="btn btn-primary btn-sm gap-1"
@@ -406,13 +413,13 @@ export default function NearMePage() {
                                     </div>
                                 ))}
 
-                                {filteredHospitals.length === 0 && (
+                                {!isFetching && hospitals.length === 0 && (
                                     <div className="col-span-full card bg-base-100 shadow-lg">
                                         <div className="card-body items-center text-center py-12">
                                             <MapPin className="w-12 h-12 text-base-content/20 mb-4" />
                                             <h3 className="text-lg font-semibold">No places found</h3>
                                             <p className="text-base-content/60">
-                                                Try adjusting your filters or increasing the distance
+                                                Try adjusting your filters or increasing the search radius
                                             </p>
                                         </div>
                                     </div>
@@ -423,25 +430,12 @@ export default function NearMePage() {
                         {/* Map View */}
                         {viewMode === "map" && (
                             <div className="lg:col-span-2">
-                                <div className="card bg-base-100 shadow-lg h-150 sticky top-24">
-                                    <div className="card-body items-center justify-center">
-                                        <Map className="w-16 h-16 text-base-content/20 mb-4" />
-                                        <h3 className="text-lg font-semibold">Map View</h3>
-                                        <p className="text-base-content/60 text-center">
-                                            Google Maps integration coming soon.
-                                            <br />
-                                            Enable with your Google Maps API key.
-                                        </p>
-                                        <a
-                                            href={`https://www.google.com/maps/search/hospitals+near+${location.lat},${location.lng}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="btn btn-primary mt-4"
-                                        >
-                                            Open in Google Maps
-                                            <ArrowRight className="w-4 h-4" />
-                                        </a>
-                                    </div>
+                                <div className="card bg-base-100 shadow-lg sticky top-24 overflow-hidden" style={{ height: "600px" }}>
+                                    <NearMeMap
+                                        userLat={location.lat}
+                                        userLng={location.lng}
+                                        hospitals={hospitals}
+                                    />
                                 </div>
                             </div>
                         )}

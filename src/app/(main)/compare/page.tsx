@@ -1,5 +1,5 @@
 "use client";
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -11,99 +11,85 @@ import {
   X,
   Check,
   Building2,
+  Loader2,
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
-// Mock hospital data
-const mockHospitals = [
-  {
-    id: "1",
-    name: "Apollo Hospital",
-    location: "Andheri West, Mumbai",
-    rating: 4.5,
-    reviews: 328,
-    accreditation: ["NABH", "JCI"],
-    mriPrice: 4500,
-    waitTime: "30 min",
-    insurance: true,
-    distance: 2.3,
-  },
-  {
-    id: "2",
-    name: "Fortis Hospital",
-    location: "Mulund, Mumbai",
-    rating: 4.2,
-    reviews: 256,
-    accreditation: ["NABH"],
-    mriPrice: 5200,
-    waitTime: "45 min",
-    insurance: true,
-    distance: 5.1,
-  },
-  {
-    id: "3",
-    name: "Lilavati Hospital",
-    location: "Bandra, Mumbai",
-    rating: 4.8,
-    reviews: 412,
-    accreditation: ["NABH", "JCI", "ISO"],
-    mriPrice: 6800,
-    waitTime: "20 min",
-    insurance: false,
-    distance: 3.8,
-  },
-];
+interface CompareHospital {
+  id: string;
+  name: string;
+  state: string;
+  district: string;
+  pincode: number;
+  telephone: string;
+  avg_price: number;
+  procedure_count: number;
+  avg_rating: number;
+  review_count: number;
+}
 
-const COMPARE_FEATURES = [
-  { key: "mriPrice", label: "MRI Scan Price", format: (v: number) => `₹${v.toLocaleString("en-IN")}` },
-  { key: "rating", label: "Rating", format: (v: number) => `${v} ★` },
-  { key: "reviews", label: "Reviews", format: (v: number) => v.toString() },
-  { key: "distance", label: "Distance", format: (v: number) => `${v} km` },
-  { key: "waitTime", label: "Avg Wait Time", format: (v: string) => v },
-  { key: "insurance", label: "Insurance", format: (v: boolean) => (v ? "Yes" : "No") },
+const COMPARE_FEATURES: { key: string; label: string; format: (v: unknown) => string }[] = [
+  { key: "avg_price", label: "Avg Procedure Price", format: (v) => v ? `₹${Math.round(v as number).toLocaleString("en-IN")}` : "N/A" },
+  { key: "avg_rating", label: "Rating", format: (v) => v ? `${(v as number).toFixed(1)} ★` : "N/A" },
+  { key: "review_count", label: "Reviews", format: (v) => String(v || 0) },
+  { key: "district", label: "District", format: (v) => String(v || "") },
+  { key: "state", label: "State", format: (v) => String(v || "") },
+  { key: "telephone", label: "Phone", format: (v) => String(v || "N/A") },
 ];
 
 function ComparePageContent() {
   const searchParams = useSearchParams();
-  const initialIds = searchParams.get("ids")?.split(",") || [];
-  
-  const [selectedIds, setSelectedIds] = useState<string[]>(
-    initialIds.length > 0 ? initialIds : ["1", "2"]
-  );
+  const idsParam = searchParams.get("ids") || "";
 
-  const selectedHospitals = mockHospitals.filter((h) =>
-    selectedIds.includes(h.id)
-  );
+  const [inputIds, setInputIds] = useState(idsParam);
+  const [hospitals, setHospitals] = useState<CompareHospital[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const availableHospitals = mockHospitals.filter(
-    (h) => !selectedIds.includes(h.id)
-  );
-
-  const addHospital = (id: string) => {
-    if (selectedIds.length < 4) {
-      setSelectedIds([...selectedIds, id]);
+  const fetchCompare = async (ids: string) => {
+    if (!ids.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/hospitals/compare?ids=${ids}`);
+      if (!res.ok) throw new Error("Failed");
+      const json = await res.json();
+      setHospitals(json.hospitals || []);
+    } catch {
+      setHospitals([]);
+    } finally {
+      setLoading(false);
     }
   };
 
+  useEffect(() => {
+    if (idsParam) fetchCompare(idsParam);
+  }, [idsParam]);
+
+  const handleCompare = () => {
+    fetchCompare(inputIds);
+  };
+
   const removeHospital = (id: string) => {
-    setSelectedIds(selectedIds.filter((i) => i !== id));
+    setHospitals(hospitals.filter((h) => h.id !== id));
+  };
+
+  const getValue = (h: CompareHospital, key: string): unknown => {
+    return (h as unknown as Record<string, unknown>)[key];
   };
 
   const getBestValue = (key: string) => {
-    if (selectedHospitals.length === 0) return null;
-    
-    if (key === "mriPrice" || key === "distance") {
-      // Lower is better
-      return selectedHospitals.reduce((best, h) =>
-        (h as unknown as Record<string, number>)[key] < (best as unknown as Record<string, number>)[key] ? h : best
+    if (hospitals.length === 0) return null;
+    if (key === "avg_price") {
+      const valid = hospitals.filter((h) => h.avg_price > 0);
+      if (valid.length === 0) return null;
+      return valid.reduce((best, h) => h.avg_price < best.avg_price ? h : best).id;
+    } else if (key === "avg_rating") {
+      return hospitals.reduce((best, h) =>
+        (h.avg_rating || 0) > (best.avg_rating || 0) ? h : best
       ).id;
-    } else if (key === "rating" || key === "reviews") {
-      // Higher is better
-      return selectedHospitals.reduce((best, h) =>
-        (h as unknown as Record<string, number>)[key] > (best as unknown as Record<string, number>)[key] ? h : best
+    } else if (key === "review_count") {
+      return hospitals.reduce((best, h) =>
+        (h.review_count || 0) > (best.review_count || 0) ? h : best
       ).id;
-    } else if (key === "insurance") {
-      return selectedHospitals.find((h) => h.insurance)?.id;
     }
     return null;
   };
@@ -118,43 +104,38 @@ function ComparePageContent() {
           <div>
             <h1 className="text-3xl font-bold">Compare Hospitals</h1>
             <p className="text-base-content/60">
-              {selectedHospitals.length} of 4 hospitals selected
+              Enter hospital IDs separated by commas to compare
             </p>
           </div>
 
-          {availableHospitals.length > 0 && selectedIds.length < 4 && (
-            <div className="dropdown dropdown-end">
-              <div tabIndex={0} role="button" className="btn btn-primary gap-2">
-                <Plus className="w-4 h-4" />
-                Add Hospital
-              </div>
-              <ul
-                tabIndex={0}
-                className="dropdown-content z-20 menu p-2 shadow-lg bg-base-100 rounded-box w-64 border border-base-200"
-              >
-                {availableHospitals.map((h) => (
-                  <li key={h.id}>
-                    <button onClick={() => addHospital(h.id)}>
-                      <Building2 className="w-4 h-4" />
-                      {h.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="e.g., HOSP00001,HOSP00002"
+              className="input input-bordered input-sm w-48"
+              value={inputIds}
+              onChange={(e) => setInputIds(e.target.value)}
+            />
+            <button className="btn btn-primary btn-sm" onClick={handleCompare} disabled={loading}>
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Compare"}
+            </button>
+          </div>
         </div>
 
-        {selectedHospitals.length === 0 ? (
+        {hospitals.length === 0 && !loading ? (
           <div className="text-center py-16">
             <Building2 className="w-16 h-16 text-base-content/20 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold mb-2">No hospitals selected</h2>
+            <h2 className="text-xl font-semibold mb-2">No hospitals to compare</h2>
             <p className="text-base-content/60 mb-4">
-              Add hospitals to compare their prices and features
+              Enter hospital IDs above or search for hospitals first
             </p>
             <Link href="/search" className="btn btn-primary">
               Search Hospitals
             </Link>
+          </div>
+        ) : loading ? (
+          <div className="text-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
           </div>
         ) : (
           <>
@@ -164,7 +145,7 @@ function ComparePageContent() {
                 <thead>
                   <tr>
                     <th className="w-48"></th>
-                    {selectedHospitals.map((hospital) => (
+                    {hospitals.map((hospital) => (
                       <th key={hospital.id} className="text-center min-w-[200px]">
                         <div className="relative">
                           <button
@@ -181,7 +162,7 @@ function ComparePageContent() {
                           </div>
                           <div className="text-sm text-base-content/60 flex items-center justify-center gap-1">
                             <MapPin className="w-3 h-3" />
-                            {hospital.location}
+                            {hospital.district}, {hospital.state}
                           </div>
                         </div>
                       </th>
@@ -194,22 +175,17 @@ function ComparePageContent() {
                     return (
                       <tr key={feature.key} className="hover">
                         <td className="font-medium">{feature.label}</td>
-                        {selectedHospitals.map((hospital) => {
-                          const value = (hospital as unknown as Record<string, unknown>)[feature.key];
+                        {hospitals.map((hospital) => {
+                          const value = getValue(hospital, feature.key);
                           const isBest = hospital.id === bestId;
                           return (
                             <td key={hospital.id} className="text-center">
                               <span
-                                className={`inline-flex items-center gap-1 ${
-                                  isBest
-                                    ? "text-success font-semibold"
-                                    : ""
-                                }`}
+                                className={`inline-flex items-center gap-1 ${isBest ? "text-success font-semibold" : ""
+                                  }`}
                               >
-                                {feature.format(value as never)}
-                                {isBest && (
-                                  <Check className="w-4 h-4" />
-                                )}
+                                {feature.format(value)}
+                                {isBest && <Check className="w-4 h-4" />}
                               </span>
                             </td>
                           );
@@ -218,30 +194,10 @@ function ComparePageContent() {
                     );
                   })}
 
-                  {/* Accreditation row */}
-                  <tr className="hover">
-                    <td className="font-medium">Accreditation</td>
-                    {selectedHospitals.map((hospital) => (
-                      <td key={hospital.id} className="text-center">
-                        <div className="flex flex-wrap gap-1 justify-center">
-                          {hospital.accreditation.map((acc) => (
-                            <span
-                              key={acc}
-                              className="badge badge-primary badge-sm gap-1"
-                            >
-                              <BadgeCheck className="w-3 h-3" />
-                              {acc}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                    ))}
-                  </tr>
-
                   {/* Action row */}
                   <tr>
                     <td></td>
-                    {selectedHospitals.map((hospital) => (
+                    {hospitals.map((hospital) => (
                       <td key={hospital.id} className="text-center">
                         <Link
                           href={`/hospital/${hospital.id}`}
@@ -257,31 +213,20 @@ function ComparePageContent() {
             </div>
 
             {/* Recommendation */}
-            {selectedHospitals.length >= 2 && (
+            {hospitals.length >= 2 && (
               <div className="card bg-success/10 border border-success/20 mt-8">
                 <div className="card-body">
                   <h3 className="card-title text-success">
                     <Check className="w-5 h-5" />
-                    Our Recommendation
+                    Best Value
                   </h3>
                   <p className="text-base-content/70">
-                    Based on price, rating, and location,{" "}
+                    Based on average procedure pricing,{" "}
                     <strong>
-                      {
-                        mockHospitals.find((h) => h.id === getBestValue("mriPrice"))
-                          ?.name
-                      }
+                      {hospitals.find((h) => h.id === getBestValue("avg_price"))?.name || "N/A"}
                     </strong>{" "}
-                    offers the best value for your search.
+                    offers the best value.
                   </p>
-                  <div className="card-actions mt-2">
-                    <Link
-                      href={`/hospital/${getBestValue("mriPrice")}`}
-                      className="btn btn-success btn-sm"
-                    >
-                      Book at Recommended Hospital
-                    </Link>
-                  </div>
                 </div>
               </div>
             )}

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, User, Bot } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
     role: 'user' | 'model';
@@ -85,8 +86,23 @@ export default function Chatbot() {
                                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
                                     <Bot size={32} className="text-primary opacity-50" />
                                 </div>
-                                <p className="font-medium">Hello! I&apos;m your AI health assistant.</p>
-                                <p className="text-sm mt-1">Ask me about hospitals, prices, or procedures.</p>
+                                <p className="font-medium">Hello! I&apos;m your MedMap AI assistant.</p>
+                                <p className="text-sm mt-1">Ask me about hospital prices, procedure costs, or insurance.</p>
+                                <div className="mt-4 flex flex-col gap-2">
+                                    {[
+                                        "What's the cost of an MRI scan?",
+                                        "Which hospitals accept insurance?",
+                                        "Average consultation fee in Delhi?",
+                                    ].map((suggestion) => (
+                                        <button
+                                            key={suggestion}
+                                            className="btn btn-xs btn-outline btn-primary w-full text-left"
+                                            onClick={() => { setInput(suggestion); }}
+                                        >
+                                            {suggestion}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         )}
 
@@ -100,8 +116,21 @@ export default function Chatbot() {
                                         {msg.role === 'user' ? <User size={20} /> : <Bot size={20} />}
                                     </div>
                                 </div>
-                                <div className={`chat-bubble ${msg.role === 'user' ? 'chat-bubble-primary' : 'chat-bubble-secondary'}`}>
-                                    {msg.text}
+                                <div className={`chat-bubble ${msg.role === 'user' ? 'chat-bubble-primary' : 'chat-bubble-secondary'} max-w-[260px] text-sm`}>
+                                    {msg.role === 'model' ? (
+                                        <ReactMarkdown
+                                            components={{
+                                                p: ({ ...props }) => <p className="mb-1 last:mb-0" {...props} />,
+                                                ul: ({ ...props }) => <ul className="list-disc pl-4 mb-1 space-y-0.5" {...props} />,
+                                                li: ({ ...props }) => <li className="pl-0.5" {...props} />,
+                                                strong: ({ ...props }) => <strong className="font-bold" {...props} />,
+                                            }}
+                                        >
+                                            {msg.text}
+                                        </ReactMarkdown>
+                                    ) : (
+                                        msg.text
+                                    )}
                                 </div>
                             </div>
                         ))}

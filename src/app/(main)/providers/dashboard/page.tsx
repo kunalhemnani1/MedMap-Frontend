@@ -1,472 +1,316 @@
-"use client";
+﻿"use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
     BarChart3,
     Users,
-    Eye,
     TrendingUp,
     Settings,
-    FileText,
-    Plus,
-    Edit,
-    Trash2,
-    Search,
-    Bell,
-    ChevronDown,
-    IndianRupee,
     Calendar,
-    Filter,
+    IndianRupee,
+    Bell,
+    Building2,
+    Stethoscope,
+    ClipboardList,
+    ChevronRight,
+    LogOut,
+    Search,
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
+import { useSession, signOut } from "@/lib/auth-client";
+
+interface Booking {
+    id: string;
+    hospital_name: string;
+    user_name: string;
+    procedure: string;
+    appointment_date: string;
+    appointment_time: string;
+    status: string;
+    estimated_cost: number;
+    doctor_name: string;
+}
+
+const providerTabs = [
+    { id: "overview", label: "Overview", icon: BarChart3 },
+    { id: "appointments", label: "Appointments", icon: Calendar },
+    { id: "patients", label: "Patients", icon: Users },
+    { id: "settings", label: "Settings", icon: Settings },
+];
 
 export default function ProviderDashboardPage() {
+    const router = useRouter();
+    const { data: session, isPending } = useSession();
     const [activeTab, setActiveTab] = useState("overview");
+    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [loading, setLoading] = useState(true);
 
-    const stats = [
-        {
-            label: "Total Views",
-            value: "12,458",
-            change: "+12%",
-            icon: Eye,
-            color: "primary",
-        },
-        {
-            label: "Patient Inquiries",
-            value: "234",
-            change: "+8%",
-            icon: Users,
-            color: "secondary",
-        },
-        {
-            label: "Procedures Listed",
-            value: "48",
-            change: "+2",
-            icon: FileText,
-            color: "accent",
-        },
-        {
-            label: "Avg. Rating",
-            value: "4.6",
-            change: "+0.2",
-            icon: TrendingUp,
-            color: "success",
-        },
-    ];
+    useEffect(() => {
+        if (!isPending && !session?.user) {
+            router.push("/auth/login");
+        }
+    }, [session, isPending, router]);
 
-    const procedures = [
-        { name: "MRI Scan", price: 8500, views: 1234, status: "active" },
-        { name: "CT Scan", price: 5500, views: 987, status: "active" },
-        { name: "Blood Test Panel", price: 1200, views: 2341, status: "active" },
-        { name: "X-Ray", price: 800, views: 876, status: "pending" },
-        { name: "Ultrasound", price: 2000, views: 654, status: "active" },
-    ];
+    useEffect(() => {
+        if (!session?.user) return;
+        fetch("/api/bookings?limit=20")
+            .then((r) => r.json())
+            .then((d) => setBookings(d.results || []))
+            .catch(() => { })
+            .finally(() => setLoading(false));
+    }, [session]);
 
-    const recentInquiries = [
-        { patient: "A***a K", procedure: "MRI Scan", date: "Today, 2:30 PM" },
-        { patient: "R***h S", procedure: "CT Scan", date: "Today, 11:15 AM" },
-        { patient: "P***a M", procedure: "Blood Test", date: "Yesterday" },
-        { patient: "S***l R", procedure: "X-Ray", date: "Yesterday" },
-    ];
+    if (isPending) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <span className="loading loading-spinner loading-lg" />
+            </div>
+        );
+    }
 
-    const tabs = [
-        { id: "overview", label: "Overview", icon: BarChart3 },
-        { id: "procedures", label: "Procedures", icon: FileText },
-        { id: "inquiries", label: "Inquiries", icon: Users },
-        { id: "settings", label: "Settings", icon: Settings },
-    ];
+    if (!session?.user) return null;
+
+    const user = session.user;
+    const role = (user as any).role || "user";
+    const isDoctor = role === "doctor";
+    const isAdmin = role === "admin";
+    const avatarLetter = (user.name?.trim()?.[0] || "U").toUpperCase();
+
+    const todayBookings = bookings.filter((b) => b.status === "Confirmed" || b.status === "Pending");
+    const completedBookings = bookings.filter((b) => b.status === "Completed");
+    const totalRevenue = bookings.reduce((s, b) => s + (b.estimated_cost || 0), 0);
 
     return (
         <div className="min-h-screen bg-base-200">
             <Breadcrumb />
 
-            {/* Dashboard Header */}
-            <section className="bg-base-100 border-b">
-                <div className="container mx-auto px-4 py-6">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div>
-                            <h1 className="text-2xl font-bold">Provider Dashboard</h1>
-                            <p className="text-base-content/60">
-                                Manage your hospital listing and procedures
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button className="btn btn-ghost btn-circle">
-                                <Bell className="w-5 h-5" />
-                            </button>
-                            <details className="dropdown dropdown-end">
-                                <summary className="btn btn-ghost gap-2">
+            <div className="container mx-auto px-4 py-8">
+                <div className="grid lg:grid-cols-4 gap-8">
+                    {/* Sidebar */}
+                    <div className="lg:col-span-1">
+                        <div className="card bg-base-100 shadow-lg sticky top-24">
+                            <div className="card-body">
+                                <div className="flex items-center gap-4 mb-6">
                                     <div className="avatar placeholder">
-                                        <div className="bg-primary text-primary-content rounded-full w-8">
-                                            <span>AP</span>
+                                        <div className="bg-secondary text-secondary-content rounded-full w-16">
+                                            <span className="text-xl">{avatarLetter}</span>
                                         </div>
                                     </div>
-                                    <span>Apollo Hospital</span>
-                                    <ChevronDown className="w-4 h-4" />
-                                </summary>
-                                <ul className="dropdown-content menu bg-base-100 rounded-box z-50 w-52 p-2 shadow-xl">
+                                    <div>
+                                        <h2 className="font-semibold text-lg">{user.name}</h2>
+                                        <p className="text-sm text-base-content/60">{user.email}</p>
+                                        <span className="badge badge-secondary mt-2 px-3 py-1 capitalize">{role}</span>
+                                    </div>
+                                </div>
+
+                                <ul className="menu p-0 gap-1">
+                                    {providerTabs.map((tab) => (
+                                        <li key={tab.id}>
+                                            <button
+                                                className={activeTab === tab.id ? "active" : ""}
+                                                onClick={() => setActiveTab(tab.id)}
+                                            >
+                                                <tab.icon className="w-4 h-4" />
+                                                {tab.label}
+                                            </button>
+                                        </li>
+                                    ))}
+                                    <div className="divider my-2" />
                                     <li>
-                                        <a>Profile</a>
-                                    </li>
-                                    <li>
-                                        <a>Settings</a>
-                                    </li>
-                                    <li>
-                                        <a>Logout</a>
+                                        <button className="text-error" onClick={() => signOut().then(() => router.push("/"))}>
+                                            <LogOut className="w-4 h-4" /> Sign Out
+                                        </button>
                                     </li>
                                 </ul>
-                            </details>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </section>
 
-            <div className="container mx-auto px-4 py-6">
-                {/* Tabs */}
-                <div className="tabs tabs-boxed bg-base-100 mb-6 p-1 inline-flex">
-                    {tabs.map((tab) => (
-                        <button
-                            key={tab.id}
-                            className={`tab gap-2 ${activeTab === tab.id ? "tab-active" : ""}`}
-                            onClick={() => setActiveTab(tab.id)}
-                        >
-                            <tab.icon className="w-4 h-4" />
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Overview Tab */}
-                {activeTab === "overview" && (
-                    <div className="space-y-6">
-                        {/* Stats Grid */}
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            {stats.map((stat, i) => (
-                                <div key={i} className="card bg-base-100 shadow">
+                    {/* Main Content */}
+                    <div className="lg:col-span-3 space-y-6">
+                        {activeTab === "overview" && (
+                            <>
+                                <div className="card bg-linear-to-r from-secondary to-accent text-white">
                                     <div className="card-body">
-                                        <div className="flex items-center justify-between">
-                                            <div
-                                                className={`w-10 h-10 rounded-lg bg-${stat.color}/10 flex items-center justify-center`}
-                                            >
-                                                <stat.icon className={`w-5 h-5 text-${stat.color}`} />
-                                            </div>
-                                            <span className="text-success text-sm font-medium">
-                                                {stat.change}
-                                            </span>
-                                        </div>
-                                        <p className="text-2xl font-bold mt-2">{stat.value}</p>
-                                        <p className="text-base-content/60 text-sm">{stat.label}</p>
+                                        <h2 className="card-title text-2xl">
+                                            {isDoctor ? "Doctor" : "Hospital Admin"} Dashboard
+                                        </h2>
+                                        <p className="opacity-80">Manage your {isDoctor ? "patients and appointments" : "hospital and staff"}</p>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
 
-                        <div className="grid lg:grid-cols-2 gap-6">
-                            {/* Top Procedures */}
-                            <div className="card bg-base-100 shadow">
-                                <div className="card-body">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h2 className="card-title">Top Procedures</h2>
-                                        <Link
-                                            href="#"
-                                            className="btn btn-ghost btn-sm"
-                                            onClick={() => setActiveTab("procedures")}
-                                        >
-                                            View All
-                                        </Link>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="stat bg-base-100 rounded-xl shadow">
+                                        <div className="stat-figure text-primary"><Calendar className="w-8 h-8" /></div>
+                                        <div className="stat-title">Upcoming</div>
+                                        <div className="stat-value text-primary">{todayBookings.length}</div>
                                     </div>
-                                    <div className="space-y-3">
-                                        {procedures.slice(0, 4).map((proc, i) => (
-                                            <div
-                                                key={i}
-                                                className="flex items-center justify-between p-3 rounded-lg bg-base-200"
-                                            >
-                                                <div>
-                                                    <p className="font-medium">{proc.name}</p>
-                                                    <p className="text-sm text-base-content/60">
-                                                        {proc.views} views
-                                                    </p>
-                                                </div>
-                                                <p className="font-semibold">
-                                                    <IndianRupee className="inline w-4 h-4" />
-                                                    {proc.price.toLocaleString()}
-                                                </p>
-                                            </div>
-                                        ))}
+                                    <div className="stat bg-base-100 rounded-xl shadow">
+                                        <div className="stat-figure text-success"><ClipboardList className="w-8 h-8" /></div>
+                                        <div className="stat-title">Completed</div>
+                                        <div className="stat-value text-success">{completedBookings.length}</div>
+                                    </div>
+                                    <div className="stat bg-base-100 rounded-xl shadow">
+                                        <div className="stat-figure text-secondary"><Users className="w-8 h-8" /></div>
+                                        <div className="stat-title">Total</div>
+                                        <div className="stat-value text-secondary">{bookings.length}</div>
+                                    </div>
+                                    <div className="stat bg-base-100 rounded-xl shadow">
+                                        <div className="stat-figure text-warning"><IndianRupee className="w-8 h-8" /></div>
+                                        <div className="stat-title">Revenue</div>
+                                        <div className="stat-value text-warning text-2xl">₹{(totalRevenue / 1000).toFixed(0)}K</div>
                                     </div>
                                 </div>
-                            </div>
 
-                            {/* Recent Inquiries */}
-                            <div className="card bg-base-100 shadow">
-                                <div className="card-body">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h2 className="card-title">Recent Inquiries</h2>
-                                        <Link
-                                            href="#"
-                                            className="btn btn-ghost btn-sm"
-                                            onClick={() => setActiveTab("inquiries")}
-                                        >
-                                            View All
-                                        </Link>
-                                    </div>
-                                    <div className="space-y-3">
-                                        {recentInquiries.map((inq, i) => (
-                                            <div
-                                                key={i}
-                                                className="flex items-center justify-between p-3 rounded-lg bg-base-200"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="avatar placeholder">
-                                                        <div className="bg-primary/10 text-primary rounded-full w-10">
-                                                            <span>{inq.patient.charAt(0)}</span>
+                                {todayBookings.length > 0 && (
+                                    <div className="card bg-base-100 shadow-lg">
+                                        <div className="card-body">
+                                            <h3 className="card-title"><Calendar className="w-5 h-5" /> Upcoming Appointments</h3>
+                                            <div className="space-y-3">
+                                                {todayBookings.slice(0, 5).map((b) => (
+                                                    <div key={b.id} className="flex items-center justify-between p-3 bg-base-200 rounded-lg">
+                                                        <div>
+                                                            <p className="font-medium">{b.user_name}</p>
+                                                            <p className="text-sm text-base-content/60">{b.procedure} - {b.hospital_name}</p>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-medium">{b.appointment_date}</p>
+                                                            <p className="text-xs text-base-content/60">{b.appointment_time}</p>
+                                                            <span className={`badge badge-sm ${b.status === "Confirmed" ? "badge-success" : "badge-warning"}`}>
+                                                                {b.status}
+                                                            </span>
                                                         </div>
                                                     </div>
-                                                    <div>
-                                                        <p className="font-medium">{inq.patient}</p>
-                                                        <p className="text-sm text-base-content/60">
-                                                            {inq.procedure}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <span className="text-sm text-base-content/60">
-                                                    {inq.date}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Procedures Tab */}
-                {activeTab === "procedures" && (
-                    <div className="card bg-base-100 shadow">
-                        <div className="card-body">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                                <h2 className="card-title">Manage Procedures</h2>
-                                <div className="flex gap-2">
-                                    <div className="join">
-                                        <div className="join-item">
-                                            <input
-                                                type="text"
-                                                placeholder="Search procedures..."
-                                                className="input input-bordered join-item w-full md:w-64"
-                                            />
-                                        </div>
-                                        <button className="btn join-item">
-                                            <Search className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                    <button className="btn btn-primary">
-                                        <Plus className="w-4 h-4" />
-                                        Add Procedure
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="overflow-x-auto">
-                                <table className="table">
-                                    <thead>
-                                        <tr>
-                                            <th>Procedure</th>
-                                            <th>Price</th>
-                                            <th>Views</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {procedures.map((proc, i) => (
-                                            <tr key={i}>
-                                                <td className="font-medium">{proc.name}</td>
-                                                <td>
-                                                    <IndianRupee className="inline w-4 h-4" />
-                                                    {proc.price.toLocaleString()}
-                                                </td>
-                                                <td>{proc.views}</td>
-                                                <td>
-                                                    <span
-                                                        className={`badge ${proc.status === "active" ? "badge-success" : "badge-warning"}`}
-                                                    >
-                                                        {proc.status}
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <div className="flex gap-1">
-                                                        <button className="btn btn-ghost btn-xs">
-                                                            <Edit className="w-4 h-4" />
-                                                        </button>
-                                                        <button className="btn btn-ghost btn-xs text-error">
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Inquiries Tab */}
-                {activeTab === "inquiries" && (
-                    <div className="card bg-base-100 shadow">
-                        <div className="card-body">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                                <h2 className="card-title">Patient Inquiries</h2>
-                                <div className="flex gap-2">
-                                    <button className="btn btn-ghost btn-sm gap-2">
-                                        <Filter className="w-4 h-4" />
-                                        Filter
-                                    </button>
-                                    <button className="btn btn-ghost btn-sm gap-2">
-                                        <Calendar className="w-4 h-4" />
-                                        Date Range
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                {[...recentInquiries, ...recentInquiries].map((inq, i) => (
-                                    <div key={i} className="p-4 rounded-xl bg-base-200">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="flex items-center gap-3">
-                                                <div className="avatar placeholder">
-                                                    <div className="bg-primary/10 text-primary rounded-full w-12">
-                                                        <span className="text-lg">{inq.patient.charAt(0)}</span>
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <p className="font-semibold">{inq.patient}</p>
-                                                    <p className="text-sm text-base-content/60">
-                                                        Inquiry for {inq.procedure}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <span className="badge badge-ghost">{inq.date}</span>
+                                                ))}
                                             </div>
                                         </div>
-                                        <div className="flex gap-2 mt-3">
-                                            <button className="btn btn-primary btn-sm">
-                                                Respond
-                                            </button>
-                                            <button className="btn btn-ghost btn-sm">
-                                                Mark as Read
-                                            </button>
+                                    </div>
+                                )}
+
+                                <div className="card bg-base-100 shadow-lg">
+                                    <div className="card-body">
+                                        <h3 className="card-title"><Bell className="w-5 h-5" /> Notifications</h3>
+                                        <div className="text-center py-6 text-base-content/50">
+                                            <Bell className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                                            <p>No new notifications</p>
                                         </div>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                )}
+                                </div>
+                            </>
+                        )}
 
-                {/* Settings Tab */}
-                {activeTab === "settings" && (
-                    <div className="grid lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 space-y-6">
-                            <div className="card bg-base-100 shadow">
+                        {activeTab === "appointments" && (
+                            <div className="card bg-base-100 shadow-lg">
                                 <div className="card-body">
-                                    <h2 className="card-title mb-4">Hospital Information</h2>
-                                    <div className="space-y-4">
+                                    <h3 className="card-title"><ClipboardList className="w-5 h-5" /> All Appointments</h3>
+                                    {loading ? (
+                                        <div className="flex justify-center py-8"><span className="loading loading-spinner loading-lg" /></div>
+                                    ) : bookings.length === 0 ? (
+                                        <div className="text-center py-12">
+                                            <Calendar className="w-12 h-12 text-base-content/20 mx-auto mb-4" />
+                                            <p className="text-base-content/60">No appointments found</p>
+                                        </div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Patient</th>
+                                                        <th>Procedure</th>
+                                                        <th>Date</th>
+                                                        <th>Doctor</th>
+                                                        <th>Status</th>
+                                                        <th>Cost</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {bookings.map((b) => (
+                                                        <tr key={b.id}>
+                                                            <td className="font-medium">{b.user_name}</td>
+                                                            <td>{b.procedure}</td>
+                                                            <td>{b.appointment_date}<br /><span className="text-xs text-base-content/60">{b.appointment_time}</span></td>
+                                                            <td>Dr. {b.doctor_name}</td>
+                                                            <td>
+                                                                <span className={`badge badge-sm ${b.status === "Confirmed" ? "badge-success" :
+                                                                    b.status === "Cancelled" ? "badge-error" :
+                                                                        b.status === "Completed" ? "badge-info" : "badge-warning"
+                                                                    }`}>{b.status}</span>
+                                                            </td>
+                                                            <td>₹{b.estimated_cost?.toLocaleString("en-IN")}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "patients" && (
+                            <div className="card bg-base-100 shadow-lg">
+                                <div className="card-body">
+                                    <h3 className="card-title"><Users className="w-5 h-5" /> Patient Records</h3>
+                                    {bookings.length === 0 ? (
+                                        <div className="text-center py-12 text-base-content/50">
+                                            <Users className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                                            <p>No patient records found</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {[...new Map(bookings.map((b) => [b.user_name, b])).values()].map((b) => (
+                                                <div key={b.user_name} className="flex items-center justify-between p-4 bg-base-200 rounded-lg">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="avatar placeholder">
+                                                            <div className="bg-primary text-primary-content rounded-full w-10">
+                                                                <span>{b.user_name?.[0] || "P"}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="font-semibold">{b.user_name}</h4>
+                                                            <p className="text-sm text-base-content/60">Last: {b.procedure}</p>
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-sm text-base-content/60">{b.appointment_date}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === "settings" && (
+                            <div className="card bg-base-100 shadow-lg">
+                                <div className="card-body">
+                                    <h3 className="card-title"><Settings className="w-5 h-5" /> Provider Settings</h3>
+                                    <div className="space-y-4 mt-4">
                                         <div className="form-control">
-                                            <label className="label">
-                                                <span className="label-text font-medium">
-                                                    Hospital Name
-                                                </span>
-                                            </label>
-                                            <input
-                                                type="text"
-                                                className="input input-bordered"
-                                                defaultValue="Apollo Hospital"
-                                            />
+                                            <label className="label"><span className="label-text font-medium">Name</span></label>
+                                            <input type="text" value={user.name || ""} className="input input-bordered" readOnly />
                                         </div>
                                         <div className="form-control">
-                                            <label className="label">
-                                                <span className="label-text font-medium">
-                                                    Description
-                                                </span>
+                                            <label className="label"><span className="label-text font-medium">Email</span></label>
+                                            <input type="email" value={user.email || ""} className="input input-bordered" readOnly />
+                                        </div>
+                                        <div className="form-control">
+                                            <label className="label"><span className="label-text font-medium">Role</span></label>
+                                            <input type="text" value={role} className="input input-bordered capitalize" readOnly />
+                                        </div>
+                                        <div className="form-control">
+                                            <label className="label cursor-pointer">
+                                                <span className="label-text font-medium">Appointment Notifications</span>
+                                                <input type="checkbox" className="toggle toggle-primary" defaultChecked />
                                             </label>
-                                            <textarea
-                                                className="textarea textarea-bordered h-24"
-                                                defaultValue="Leading multi-specialty hospital providing world-class healthcare services."
-                                            />
-                                        </div>
-                                        <div className="grid md:grid-cols-2 gap-4">
-                                            <div className="form-control">
-                                                <label className="label">
-                                                    <span className="label-text font-medium">Phone</span>
-                                                </label>
-                                                <input
-                                                    type="tel"
-                                                    className="input input-bordered"
-                                                    defaultValue="+91 22 1234 5678"
-                                                />
-                                            </div>
-                                            <div className="form-control">
-                                                <label className="label">
-                                                    <span className="label-text font-medium">Email</span>
-                                                </label>
-                                                <input
-                                                    type="email"
-                                                    className="input input-bordered"
-                                                    defaultValue="info@apollohospital.com"
-                                                />
-                                            </div>
-                                        </div>
-                                        <button className="btn btn-primary">Save Changes</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div className="card bg-base-100 shadow">
-                                <div className="card-body">
-                                    <h2 className="card-title mb-4">Verification Status</h2>
-                                    <div className="flex items-center gap-3 p-3 rounded-lg bg-success/10">
-                                        <div className="w-10 h-10 rounded-full bg-success/20 flex items-center justify-center">
-                                            <TrendingUp className="w-5 h-5 text-success" />
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-success">Verified</p>
-                                            <p className="text-sm text-base-content/60">
-                                                Last verified on Jan 15, 2025
-                                            </p>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-
-                            <div className="card bg-base-100 shadow">
-                                <div className="card-body">
-                                    <h2 className="card-title mb-4">Quick Actions</h2>
-                                    <div className="space-y-2">
-                                        <button className="btn btn-block btn-ghost justify-start gap-3">
-                                            <FileText className="w-4 h-4" />
-                                            Update Documents
-                                        </button>
-                                        <button className="btn btn-block btn-ghost justify-start gap-3">
-                                            <Users className="w-4 h-4" />
-                                            Manage Staff
-                                        </button>
-                                        <button className="btn btn-block btn-ghost justify-start gap-3">
-                                            <Bell className="w-4 h-4" />
-                                            Notification Settings
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        )}
                     </div>
-                )}
+                </div>
             </div>
         </div>
     );

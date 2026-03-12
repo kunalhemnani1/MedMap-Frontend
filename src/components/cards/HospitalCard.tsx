@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { Star, Heart, MapPin, Clock, BadgeCheck, Building2 } from "lucide-react";
+import Image from "next/image";
+import { Star, Heart, MapPin, Clock, BadgeCheck } from "lucide-react";
+import { getHospitalPhoto } from "@/lib/hospitalPhotos";
 
 interface HospitalCardProps {
     id: string | number;
@@ -42,17 +44,13 @@ export default function HospitalCard({
         <div className="card bg-base-100 border border-base-200 shadow-sm hover:shadow-lg hover:border-primary/30 transition-all duration-300 group">
             {/* Image */}
             <figure className="relative h-40 bg-base-200 overflow-hidden">
-                {imageUrl ? (
-                    <img
-                        src={imageUrl}
-                        alt={name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                        <Building2 className="w-16 h-16 text-base-content/20" />
-                    </div>
-                )}
+                <Image
+                    src={imageUrl || getHospitalPhoto(id)}
+                    alt={name}
+                    fill
+                    className="object-cover transition-transform duration-300 group-hover:scale-105"
+                    sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+                />
                 {/* Save button */}
                 <button
                     onClick={onSave}

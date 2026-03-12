@@ -1,36 +1,37 @@
-import Fuse from "fuse.js";
-import type { FuseResult } from "fuse.js";
-import data from "@/app/api/search/hospital/hospitalsinmp.json";
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 export type Hospital = {
-    Sr_No: number;
-    Location_Coordinates: string;
-    Location: string;
-    Hospital_Name: string;
-    Address_Original_First_Line: string;
-    State: string;
-    District: string;
-    Pincode: number;
-    Telephone: number;
-    Mobile_Number: number;
-    Emergency_Num: number;
+    id: string;
+    name: string;
+    type: string;
+    address: string;
+    city: string;
+    district: string;
+    state: string;
+    pincode: number;
+    latitude: number;
+    longitude: number;
+    telephone: string;
+    mobile: string;
+    emergency: string;
+    email: string;
+    website: string;
+    specialties: string[];
+    beds: number;
+    rating: number;
+    review_count: number;
+    accreditations: string[];
+    established_year: number;
+    has_emergency: boolean;
+    has_ambulance: boolean;
+    has_pharmacy: boolean;
+    has_blood_bank: boolean;
+    has_icu: boolean;
+    accepts_insurance: boolean;
+    consultation_fee_range: number[];
+    avg_wait_time_days: number;
+    image_url: string;
 };
-
-const hospitals: readonly Hospital[] = data as Hospital[];
-
-const searchKeys = [
-    "Sr_No",
-    "Location_Coordinates",
-    "Location",
-    "Hospital_Name",
-    "Address_Original_First_Line",
-    "State",
-    "District",
-    "Pincode",
-    "Telephone",
-    "Mobile_Number",
-    "Emergency_Num",
-];
 
 export interface SearchParams {
     query?: string | null;
@@ -49,53 +50,28 @@ export interface SearchResult {
     totalPages: number;
 }
 
-export function searchHospitals(params: SearchParams): SearchResult {
-    const {
-        query,
-        state,
-        district,
-        pincode,
-        limit = 10,
-        page = 1
-    } = params;
+export async function searchHospitals(params: SearchParams): Promise<SearchResult> {
+    const { query, state, district, pincode, limit = 10, page = 1 } = params;
 
-    let filtered: readonly Hospital[] = hospitals;
+    const url = new URL(`${BACKEND_URL}/api/search/hospitals`);
+    if (query) url.searchParams.set("q", query);
+    if (state) url.searchParams.set("state", state);
+    if (district) url.searchParams.set("district", district);
+    if (pincode) url.searchParams.set("pincode", pincode);
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("page", String(page));
 
-    if (state) {
-        filtered = filtered.filter((item) => item.State?.toLowerCase() === state.toLowerCase());
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        return { results: [], total: 0, page, limit, totalPages: 0 };
     }
-    if (district) {
-        filtered = filtered.filter((item) => item.District?.toLowerCase() === district.toLowerCase());
-    }
-    if (pincode) {
-        const pin = parseInt(pincode, 10);
-        filtered = Number.isFinite(pin) ? filtered.filter((item) => item.Pincode === pin) : filtered;
-    }
-
-    let results: Hospital[];
-
-    if (query) {
-        const fuse = new Fuse<Hospital>(filtered, { keys: searchKeys });
-        results = fuse.search(query).map((hit: FuseResult<Hospital>) => hit.item);
-    } else {
-        results = [...filtered];
-    }
-
-    const total = results.length;
-    // ensure limit is positive
-    const safeLimit = Math.max(1, limit);
-    const totalPages = Math.max(1, Math.ceil(total / safeLimit));
-    const safePage = Math.max(1, Math.min(page, totalPages));
-
-    // logic handling for excessive pagination
-    const start = (safePage - 1) * safeLimit;
-    const pagedResults = results.slice(start, start + safeLimit);
-
+    const data = await response.json();
     return {
-        results: pagedResults,
-        total,
-        page: safePage,
-        limit: safeLimit,
-        totalPages,
+        results: data.results ?? [],
+        total: data.total ?? 0,
+        page: data.page ?? page,
+        limit: data.limit ?? limit,
+        totalPages: data.totalPages ?? 0,
     };
 }
+

@@ -4,22 +4,29 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import {
     Calculator,
+    Calendar,
     ChevronDown,
     Compass,
     GitCompare,
     HelpCircle,
+    LogIn,
+    LogOut,
     Menu,
+    Mic,
     Moon,
     Search,
     Shield,
     Sun,
     TrendingUp,
     User,
+    UserPlus,
     X,
     Building2,
 } from "lucide-react";
 
 import { useTheme } from "@/components/providers/ThemeProvider";
+import { useSession, signOut } from "@/lib/auth-client";
+import LangSelector from "@/components/layout/LangSelector";
 
 export default function Navbar() {
     const { theme, toggleTheme } = useTheme();
@@ -27,6 +34,12 @@ export default function Navbar() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [productsOpen, setProductsOpen] = useState(false);
     const [resourcesOpen, setResourcesOpen] = useState(false);
+    const { data: session } = useSession();
+    const userRole = (session?.user as { role?: string } | undefined)?.role;
+    const dashboardHref =
+        userRole === "admin" ? "/admin/dashboard" :
+            userRole === "doctor" ? "/doctor/dashboard" :
+                "/user/dashboard";
 
     // Delayed hide timers to avoid flicker on hover dropdowns
     const productsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -58,11 +71,13 @@ export default function Navbar() {
         { href: "/price-estimator", label: "Price Estimator", icon: Calculator },
         { href: "/compare", label: "Compare Hospitals", icon: GitCompare },
         { href: "/near-me", label: "Near Me", icon: Compass },
+        { href: "/book-appointment", label: "Book Appointment", icon: Calendar },
     ];
 
     const resourcesLinks = [
         { href: "/insights", label: "Market Insights", icon: TrendingUp },
         { href: "/faq", label: "Help Center", icon: HelpCircle },
+        { href: "/providers/register", label: "For Providers", icon: Building2 },
     ];
 
     return (
@@ -160,8 +175,9 @@ export default function Navbar() {
                     </div>
                 </div>
 
-                {/* Right side: Theme, Auth */}
+                {/* Right side: Theme, Lang, Auth */}
                 <div className="navbar-end gap-2">
+                    <LangSelector />
                     <button
                         className="btn btn-ghost btn-circle"
                         onClick={onToggleTheme}
@@ -170,12 +186,43 @@ export default function Navbar() {
                         {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                     </button>
 
-                    <Link href="/user/dashboard" className="btn btn-ghost btn-circle">
-                        <User className="w-5 h-5" />
-                    </Link>
-                    <Link href="/search" className="btn btn-primary btn-sm hidden md:flex">
-                        Get Started
-                    </Link>
+                    {session?.user ? (
+                        <>
+                            {/* Record Visit — patients only */}
+                            {userRole === "user" && (
+                                <Link
+                                    href="/record-visit"
+                                    className="btn btn-sm gap-2 border border-error text-error hover:bg-error hover:text-white transition-colors"
+                                >
+                                    <span className="relative flex h-2.5 w-2.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75" />
+                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-error" />
+                                    </span>
+                                    Record Visit
+                                </Link>
+                            )}
+                            <Link href={dashboardHref} className="btn btn-ghost btn-circle">
+                                <User className="w-5 h-5" />
+                            </Link>
+                            <button
+                                onClick={() => signOut().then(() => window.location.href = "/")}
+                                className="btn btn-ghost btn-sm hidden md:flex gap-1"
+                            >
+                                <LogOut className="w-4 h-4" />
+                                Sign Out
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <Link href="/auth/login" className="btn btn-ghost btn-sm hidden md:flex gap-1">
+                                <LogIn className="w-4 h-4" />
+                                Sign In
+                            </Link>
+                            <Link href="/auth/register" className="btn btn-primary btn-sm hidden md:flex">
+                                Get Started
+                            </Link>
+                        </>
+                    )}
                 </div>
             </nav>
 
@@ -237,14 +284,58 @@ export default function Navbar() {
                         </ul>
 
                         <div className="px-4 pb-6 flex flex-col gap-2">
-                            <Link
-                                href="/user/dashboard"
-                                onClick={() => setMobileMenuOpen(false)}
-                                className="btn btn-ghost justify-start"
-                            >
-                                <User className="w-4 h-4" />
-                                Dashboard
-                            </Link>
+                            {session?.user ? (
+                                <>
+                                    {userRole === "user" && (
+                                        <Link
+                                            href="/record-visit"
+                                            onClick={() => setMobileMenuOpen(false)}
+                                            className="btn btn-outline btn-error justify-start gap-3"
+                                        >
+                                            <span className="relative flex h-2.5 w-2.5">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-error opacity-75" />
+                                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-error" />
+                                            </span>
+                                            <Mic className="w-4 h-4" />
+                                            Record Visit
+                                        </Link>
+                                    )}
+                                    <Link
+                                        href={dashboardHref}
+                                        onClick={() => setMobileMenuOpen(false)}
+                                        className="btn btn-ghost justify-start"
+                                    >
+                                        <User className="w-4 h-4" />
+                                        {session.user.name || "Dashboard"}
+                                    </Link>
+                                    <button
+                                        onClick={() => { setMobileMenuOpen(false); signOut().then(() => window.location.href = "/"); }}
+                                        className="btn btn-outline justify-start text-error"
+                                    >
+                                        <LogOut className="w-4 h-4" />
+                                        Sign Out
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <Link
+                                        href="/auth/login"
+                                        onClick={() => setMobileMenuOpen(false)}
+                                        className="btn btn-ghost justify-start"
+                                    >
+                                        <LogIn className="w-4 h-4" />
+                                        Sign In
+                                    </Link>
+                                    <Link
+                                        href="/auth/register"
+                                        onClick={() => setMobileMenuOpen(false)}
+                                        className="btn btn-primary justify-start"
+                                    >
+                                        <UserPlus className="w-4 h-4" />
+                                        Create Account
+                                    </Link>
+                                </>
+                            )}
                             <Link
                                 href="/providers/register"
                                 onClick={() => setMobileMenuOpen(false)}
@@ -252,14 +343,6 @@ export default function Navbar() {
                             >
                                 <Building2 className="w-4 h-4" />
                                 For Providers
-                            </Link>
-                            <Link
-                                href="/search"
-                                onClick={() => setMobileMenuOpen(false)}
-                                className="btn btn-primary justify-start"
-                            >
-                                <Search className="w-4 h-4" />
-                                Start Searching
                             </Link>
                         </div>
                     </aside>

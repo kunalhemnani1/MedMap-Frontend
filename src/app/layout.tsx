@@ -1,8 +1,12 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import Chatbot from "@/components/Chatbot";
+import OfflineBanner from "@/components/shared/OfflineBanner";
+import BackgroundNearbyCache from "@/components/shared/BackgroundNearbyCache";
+import GoogleTranslate from "@/components/layout/GoogleTranslate";
+
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
@@ -11,6 +15,16 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "MedMap - Healthcare Cost Transparency",
   description: "Compare healthcare costs, check insurance coverage, and find the best care for your budget.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "MedMap",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#2563eb",
 };
 
 export default function RootLayout({
@@ -23,6 +37,9 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider>{children}</ThemeProvider>
         <Chatbot />
+        <OfflineBanner />
+        <BackgroundNearbyCache />
+        <GoogleTranslate />
       </body>
     </html>
   );
