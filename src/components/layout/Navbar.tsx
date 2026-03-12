@@ -25,6 +25,7 @@ import {
 
 import { useTheme } from "@/components/providers/ThemeProvider";
 import { useSession, signOut } from "@/lib/auth-client";
+import LangSelector from "@/components/layout/LangSelector";
 
 export default function Navbar() {
     const { theme, toggleTheme } = useTheme();
@@ -173,8 +174,9 @@ export default function Navbar() {
                     </div>
                 </div>
 
-                {/* Right side: Theme, Auth */}
+                {/* Right side: Theme, Lang, Auth */}
                 <div className="navbar-end gap-2">
+                    <LangSelector />
                     <button
                         className="btn btn-ghost btn-circle"
                         onClick={onToggleTheme}

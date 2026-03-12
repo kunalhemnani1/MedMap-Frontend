@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import Chatbot from "@/components/Chatbot";
 import OfflineBanner from "@/components/shared/OfflineBanner";
 import BackgroundNearbyCache from "@/components/shared/BackgroundNearbyCache";
+import GoogleTranslate from "@/components/layout/GoogleTranslate";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -38,6 +39,7 @@ export default function RootLayout({
         <Chatbot />
         <OfflineBanner />
         <BackgroundNearbyCache />
+        <GoogleTranslate />
       </body>
     </html>
   );
