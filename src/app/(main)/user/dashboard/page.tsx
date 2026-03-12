@@ -27,15 +27,16 @@ interface Bookmark {
     createdAt: string;
 }
 
-interface Booking {
+interface Appointment {
     id: string;
-    hospital_name: string;
     procedure: string;
-    appointment_date: string;
-    appointment_time: string;
+    appointmentDate: string;
+    appointmentTime: string;
     status: string;
-    estimated_cost: number;
-    doctor_name: string;
+    estimatedCost: number | null;
+    patientName: string;
+    hospital: { id: string; name: string; city: string; state: string; phone: string } | null;
+    doctor: { id: string; name: string; specialty: string } | null;
 }
 
 const tabs = [
@@ -51,7 +52,7 @@ export default function DashboardPage() {
     const { data: session, isPending } = useSession();
     const [activeTab, setActiveTab] = useState("overview");
     const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -66,12 +67,12 @@ export default function DashboardPage() {
         const fetchData = async () => {
             setLoading(true);
             try {
-                const [bkRes, boRes] = await Promise.all([
+                const [bkRes, apptRes] = await Promise.all([
                     fetch("/api/bookmarks").then((r) => r.json()).catch(() => ({ bookmarks: [] })),
-                    fetch("/api/bookings?limit=10").then((r) => r.json()).catch(() => ({ results: [] })),
+                    fetch("/api/appointments").then((r) => r.json()).catch(() => ({ appointments: [] })),
                 ]);
                 setBookmarks(bkRes.bookmarks || []);
-                setBookings(boRes.results || []);
+                setAppointments(apptRes.appointments || []);
             } finally {
                 setLoading(false);
             }
@@ -97,7 +98,7 @@ export default function DashboardPage() {
         .toUpperCase()
         .slice(0, 2);
 
-    const upcomingBookings = bookings.filter((b) => b.status === "Confirmed" || b.status === "Pending");
+    const upcomingAppointments = appointments.filter((a) => a.status === "confirmed" || a.status === "pending");
 
     return (
         <div className="min-h-screen bg-base-200">
@@ -177,32 +178,34 @@ export default function DashboardPage() {
                                     </div>
                                     <div className="stat bg-base-100 rounded-xl shadow">
                                         <div className="stat-figure text-secondary"><Calendar className="w-8 h-8" /></div>
-                                        <div className="stat-title">Bookings</div>
-                                        <div className="stat-value text-secondary">{bookings.length}</div>
+                                        <div className="stat-title">Appointments</div>
+                                        <div className="stat-value text-secondary">{appointments.length}</div>
                                     </div>
                                     <div className="stat bg-base-100 rounded-xl shadow">
                                         <div className="stat-figure text-success"><TrendingDown className="w-8 h-8" /></div>
                                         <div className="stat-title">Upcoming</div>
-                                        <div className="stat-value text-success">{upcomingBookings.length}</div>
+                                        <div className="stat-value text-success">{upcomingAppointments.length}</div>
                                     </div>
                                 </div>
 
-                                {upcomingBookings.length > 0 && (
+                                {upcomingAppointments.length > 0 && (
                                     <div className="card bg-base-100 shadow-lg">
                                         <div className="card-body">
                                             <h3 className="card-title"><Calendar className="w-5 h-5" /> Upcoming Appointments</h3>
                                             <div className="space-y-3">
-                                                {upcomingBookings.slice(0, 3).map((b) => (
-                                                    <div key={b.id} className="flex items-center justify-between p-3 bg-base-200 rounded-lg">
+                                                {upcomingAppointments.slice(0, 3).map((a) => (
+                                                    <div key={a.id} className="flex items-center justify-between p-3 bg-base-200 rounded-lg">
                                                         <div>
-                                                            <p className="font-medium">{b.procedure}</p>
-                                                            <p className="text-sm text-base-content/60">{b.hospital_name} - Dr. {b.doctor_name}</p>
+                                                            <p className="font-medium">{a.procedure}</p>
+                                                            <p className="text-sm text-base-content/60">
+                                                                {a.hospital?.name}{a.doctor ? ` — Dr. ${a.doctor.name}` : ""}
+                                                            </p>
                                                         </div>
                                                         <div className="text-right">
-                                                            <p className="text-sm font-medium">{b.appointment_date}</p>
-                                                            <p className="text-xs text-base-content/60">{b.appointment_time}</p>
-                                                            <span className={`badge badge-sm ${b.status === "Confirmed" ? "badge-success" : "badge-warning"}`}>
-                                                                {b.status}
+                                                            <p className="text-sm font-medium">{new Date(a.appointmentDate).toLocaleDateString("en-IN")}</p>
+                                                            <p className="text-xs text-base-content/60">{a.appointmentTime}</p>
+                                                            <span className={`badge badge-sm ${a.status === "confirmed" ? "badge-success" : "badge-warning"}`}>
+                                                                {a.status}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -227,14 +230,14 @@ export default function DashboardPage() {
                         {activeTab === "bookings" && (
                             <div className="card bg-base-100 shadow-lg">
                                 <div className="card-body">
-                                    <h3 className="card-title"><ClipboardList className="w-5 h-5" /> Your Bookings</h3>
+                                    <h3 className="card-title"><ClipboardList className="w-5 h-5" /> Your Appointments</h3>
                                     {loading ? (
                                         <div className="flex justify-center py-8"><span className="loading loading-spinner loading-lg" /></div>
-                                    ) : bookings.length === 0 ? (
+                                    ) : appointments.length === 0 ? (
                                         <div className="text-center py-12">
                                             <Calendar className="w-12 h-12 text-base-content/20 mx-auto mb-4" />
-                                            <p className="text-base-content/60">No bookings yet</p>
-                                            <Link href="/search" className="btn btn-primary mt-4">Find Hospitals</Link>
+                                            <p className="text-base-content/60">No appointments yet</p>
+                                            <Link href="/book-appointment" className="btn btn-primary mt-4">Book Now</Link>
                                         </div>
                                     ) : (
                                         <div className="overflow-x-auto">
@@ -243,24 +246,28 @@ export default function DashboardPage() {
                                                     <tr>
                                                         <th>Procedure</th>
                                                         <th>Hospital</th>
+                                                        <th>Doctor</th>
                                                         <th>Date</th>
                                                         <th>Status</th>
                                                         <th>Cost</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {bookings.map((b) => (
-                                                        <tr key={b.id}>
-                                                            <td className="font-medium">{b.procedure}</td>
-                                                            <td>{b.hospital_name}</td>
-                                                            <td>{b.appointment_date}<br /><span className="text-xs text-base-content/60">{b.appointment_time}</span></td>
-                                                            <td>
-                                                                <span className={`badge badge-sm ${b.status === "Confirmed" ? "badge-success" :
-                                                                        b.status === "Cancelled" ? "badge-error" :
-                                                                            b.status === "Completed" ? "badge-info" : "badge-warning"
-                                                                    }`}>{b.status}</span>
+                                                    {appointments.map((a) => (
+                                                        <tr key={a.id}>
+                                                            <td className="font-medium">{a.procedure}</td>
+                                                            <td>{a.hospital?.name ?? "—"}<br /><span className="text-xs text-base-content/60">{a.hospital?.city}</span></td>
+                                                            <td>{a.doctor ? `Dr. ${a.doctor.name}` : "—"}</td>
+                                                            <td>{new Date(a.appointmentDate).toLocaleDateString("en-IN")}<br />
+                                                                <span className="text-xs text-base-content/60">{a.appointmentTime}</span>
                                                             </td>
-                                                            <td>₹{b.estimated_cost?.toLocaleString("en-IN")}</td>
+                                                            <td>
+                                                                <span className={`badge badge-sm ${a.status === "confirmed" ? "badge-success" :
+                                                                    a.status === "cancelled" ? "badge-error" :
+                                                                        a.status === "completed" ? "badge-info" : "badge-warning"
+                                                                    }`}>{a.status}</span>
+                                                            </td>
+                                                            <td>{a.estimatedCost ? `₹${a.estimatedCost.toLocaleString("en-IN")}` : "—"}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>

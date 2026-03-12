@@ -55,7 +55,7 @@ export async function POST(req: Request) {
 
         const ai = new GoogleGenAI({ apiKey });
         const resp = await ai.models.generateContent({
-            model: "gemma-3-27b",
+            model: "gemini-2.5-flash-lite",
             contents: prompt + (message ? `\n\nUser also asked: "${message}"` : ""),
         });
 

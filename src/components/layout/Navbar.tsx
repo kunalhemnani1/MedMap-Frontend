@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import {
     Calculator,
+    Calendar,
     ChevronDown,
     Compass,
     GitCompare,
@@ -32,6 +33,11 @@ export default function Navbar() {
     const [productsOpen, setProductsOpen] = useState(false);
     const [resourcesOpen, setResourcesOpen] = useState(false);
     const { data: session } = useSession();
+    const userRole = (session?.user as { role?: string } | undefined)?.role;
+    const dashboardHref =
+        userRole === "admin" ? "/admin/dashboard" :
+            userRole === "doctor" ? "/doctor/dashboard" :
+                "/user/dashboard";
 
     // Delayed hide timers to avoid flicker on hover dropdowns
     const productsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -63,11 +69,13 @@ export default function Navbar() {
         { href: "/price-estimator", label: "Price Estimator", icon: Calculator },
         { href: "/compare", label: "Compare Hospitals", icon: GitCompare },
         { href: "/near-me", label: "Near Me", icon: Compass },
+        { href: "/book-appointment", label: "Book Appointment", icon: Calendar },
     ];
 
     const resourcesLinks = [
         { href: "/insights", label: "Market Insights", icon: TrendingUp },
         { href: "/faq", label: "Help Center", icon: HelpCircle },
+        { href: "/providers/register", label: "For Providers", icon: Building2 },
     ];
 
     return (
@@ -177,7 +185,7 @@ export default function Navbar() {
 
                     {session?.user ? (
                         <>
-                            <Link href="/user/dashboard" className="btn btn-ghost btn-circle">
+                            <Link href={dashboardHref} className="btn btn-ghost btn-circle">
                                 <User className="w-5 h-5" />
                             </Link>
                             <button
@@ -263,7 +271,7 @@ export default function Navbar() {
                             {session?.user ? (
                                 <>
                                     <Link
-                                        href="/user/dashboard"
+                                        href={dashboardHref}
                                         onClick={() => setMobileMenuOpen(false)}
                                         className="btn btn-ghost justify-start"
                                     >

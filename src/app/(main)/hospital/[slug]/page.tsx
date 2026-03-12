@@ -13,6 +13,7 @@ import {
   Building2,
   ChevronRight,
   Loader2,
+  Calendar,
 } from "lucide-react";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 
@@ -198,6 +199,14 @@ export default function HospitalDetailPage({ params }: HospitalPageProps) {
               >
                 <Phone className="w-4 h-4" />
                 Call Now
+              </a>
+
+              <a
+                href={`/book-appointment`}
+                className="btn btn-success btn-block mt-2"
+              >
+                <Calendar className="w-4 h-4" />
+                Book Appointment
               </a>
             </div>
           </div>
